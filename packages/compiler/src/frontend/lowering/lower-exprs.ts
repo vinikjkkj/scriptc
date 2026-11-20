@@ -18061,6 +18061,10 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
       // decode, a plain Uint8Array's comma join, a DataView's tag.
       return { kind: "libCall", fn: "bytes.jsString", args: [e], type: STRING, loc: e.loc };
     }
+    if (e.type.kind === "bytes" && e.type.elem !== "buf" && e.type.elem !== "i64" && e.type.elem !== "u64") {
+      // String(f64array) / `${i32array}`: Array.prototype.toString, the comma join of the elements.
+      return { kind: "bytesIntrinsic", method: "join", receiver: e, args: [{ kind: "strLit", value: ",", type: STRING, loc: e.loc }], type: STRING, loc: e.loc };
+    }
     if (e.type.kind === "map" || e.type.kind === "set") {
       // Object.prototype.toString's constant: nothing can override it on a
       // Map or Set here. The operand still evaluates (effects).

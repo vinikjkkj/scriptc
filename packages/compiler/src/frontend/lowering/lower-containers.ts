@@ -3313,6 +3313,218 @@ function lowerInsertedItems(L: Lowerer, args: readonly ts.Expression[], elem: Ir
     };
   }
 
+/** The typed-array methods that read or reorder elements with no user code in between, as interned IR helpers over `get` / `bytesSet`
+ *  (every width but the bigint views, which read bigints): at, indexOf, lastIndexOf, includes, reverse. */
+function bytesNumericElem(e: IrBytesElem): boolean {
+  return e !== "buf" && e !== "i64" && e !== "u64";
+}
+
+type BytesLoopKind = "at" | "indexOf" | "lastIndexOf" | "includes" | "reverse";
+
+function buildBytesLoopFn(name: string, kind: BytesLoopKind, hasFrom: boolean, bytesT: IrType & { kind: "bytes" }, resultT: IrType | null,
+  foundTag: number, undefTag: number, loc: SrcLoc): IrFunction {
+  const ref = (localId: string, type: IrType = F64): IrExpr => ({ kind: "varRef", localId, type, loc });
+  const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+  const bin = (op: "<" | "<=" | ">" | ">=" | "!==" | "===" | "+" | "-" | "/", left: IrExpr, right: IrExpr, type: IrType = BOOL): IrExpr => ({ kind: "bin", op, left, right, type, loc });
+  const ret = (value: IrExpr): IrStmt => ({ kind: "return", value, loc });
+  const assign = (localId: string, value: IrExpr): IrStmt => ({ kind: "assign", localId, value, loc });
+  const get = (index: IrExpr): IrExpr => ({ kind: "bytesIntrinsic", method: "get", receiver: ref("a.0", bytesT), args: [index], type: F64, loc });
+  const lenOf: IrStmt = { kind: "varDecl", localId: "n.0", init: { kind: "bytesIntrinsic", method: "length", receiver: ref("a.0", bytesT), args: [], type: F64, loc }, loc };
+  const params: IrParam[] = [{ localId: "a.0", name: "a", type: bytesT }];
+  const locals: IrLocal[] = [{ id: "a.0", name: "a", type: bytesT, mutable: false }, { id: "n.0", name: "n", type: F64, mutable: false }];
+  const addParam = (id: string): void => {
+    params.push({ localId: id, name: id.split(".")[0]!, type: F64 });
+    locals.push({ id, name: id.split(".")[0]!, type: F64, mutable: false });
+  };
+  const addLocal = (id: string, mutable = true): void => { locals.push({ id, name: id.split(".")[0]!, type: F64, mutable }); };
+  // ToIntegerOrInfinity over a double: NaN is 0, everything else truncates (an infinity stays one).
+  const toInt = (id: string): IrStmt[] => [
+    assign(id, { kind: "libCall", fn: "math.trunc", args: [ref(id)], type: F64, loc }),
+    { kind: "if", cond: bin("!==", ref(id), ref(id)), then: [assign(id, num(0))], else_: null, loc },
+  ];
+  let body: IrStmt[];
+  let returnType: IrType;
+  if (kind === "at") {
+    addParam("i.0");
+    addLocal("k.0");
+    const miss: IrExpr = { kind: "unionWrap", unionId: (resultT as { unionId: string }).unionId, tag: undefTag, value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: resultT!, loc };
+    const found: IrExpr = { kind: "unionWrap", unionId: (resultT as { unionId: string }).unionId, tag: foundTag, value: get(ref("k.0")), type: resultT!, loc };
+    returnType = resultT!;
+    body = [
+      lenOf,
+      { kind: "varDecl", localId: "k.0", init: ref("i.0"), loc },
+      ...toInt("k.0"),
+      { kind: "if", cond: bin("<", ref("k.0"), num(0)), then: [assign("k.0", bin("+", ref("k.0"), ref("n.0"), F64))], else_: null, loc },
+      { kind: "if", cond: bin("<", ref("k.0"), num(0)), then: [ret(miss)], else_: null, loc },
+      { kind: "if", cond: bin(">=", ref("k.0"), ref("n.0")), then: [ret(miss)], else_: null, loc },
+      ret(found),
+    ];
+  } else if (kind === "reverse") {
+    addLocal("i.0");
+    addLocal("j.0");
+    addLocal("t.0", false);
+    returnType = bytesT;
+    const set = (index: IrExpr, value: IrExpr): IrStmt => ({ kind: "bytesSet", arr: ref("a.0", bytesT), index, value, loc });
+    body = [
+      lenOf,
+      { kind: "varDecl", localId: "j.0", init: bin("-", ref("n.0"), num(1), F64), loc },
+      {
+        kind: "for",
+        init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
+        cond: bin("<", ref("i.0"), ref("j.0")),
+        update: assign("i.0", bin("+", ref("i.0"), num(1), F64)),
+        body: [
+          { kind: "varDecl", localId: "t.0", init: get(ref("i.0")), loc },
+          set(ref("i.0"), get(ref("j.0"))),
+          set(ref("j.0"), ref("t.0")),
+          assign("j.0", bin("-", ref("j.0"), num(1), F64)),
+        ],
+        loc,
+      },
+      ret(ref("a.0", bytesT)),
+    ];
+  } else {
+    addParam("v.0");
+    if (hasFrom) addParam("from.0");
+    addLocal("k.0");
+    addLocal("i.0");
+    returnType = kind === "includes" ? BOOL : F64;
+    const hit = (e: IrExpr): IrExpr => {
+      if (kind !== "includes") return bin("===", e, ref("v.0"));
+      // SameValueZero: equal, or both NaN.
+      return {
+        kind: "ternary",
+        cond: bin("===", e, ref("v.0")),
+        then: { kind: "boolLit", value: true, type: BOOL, loc },
+        else_: { kind: "ternary", cond: bin("!==", ref("v.0"), ref("v.0")), then: bin("!==", e, e), else_: { kind: "boolLit", value: false, type: BOOL, loc }, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      };
+    };
+    const found = (idx: IrExpr): IrStmt => ret(kind === "includes" ? { kind: "boolLit", value: true, type: BOOL, loc } : idx);
+    const notFound: IrStmt = ret(kind === "includes" ? { kind: "boolLit", value: false, type: BOOL, loc } : num(-1));
+    if (kind === "lastIndexOf") {
+      body = [
+        lenOf,
+        { kind: "if", cond: bin("===", ref("n.0"), num(0)), then: [notFound], else_: null, loc },
+        { kind: "varDecl", localId: "k.0", init: hasFrom ? ref("from.0") : bin("-", ref("n.0"), num(1), F64), loc },
+        ...(hasFrom ? toInt("k.0") : []),
+        {
+          kind: "if",
+          cond: bin(">=", ref("k.0"), num(0)),
+          then: [{ kind: "if", cond: bin(">=", ref("k.0"), ref("n.0")), then: [assign("k.0", bin("-", ref("n.0"), num(1), F64))], else_: null, loc }],
+          else_: [assign("k.0", bin("+", ref("n.0"), ref("k.0"), F64))],
+          loc,
+        },
+        {
+          kind: "for",
+          init: { kind: "varDecl", localId: "i.0", init: ref("k.0"), loc },
+          cond: bin(">=", ref("i.0"), num(0)),
+          update: assign("i.0", bin("-", ref("i.0"), num(1), F64)),
+          body: [{ kind: "if", cond: hit(get(ref("i.0"))), then: [found(ref("i.0"))], else_: null, loc }],
+          loc,
+        },
+        notFound,
+      ];
+    } else {
+      body = [
+        lenOf,
+        { kind: "if", cond: bin("===", ref("n.0"), num(0)), then: [notFound], else_: null, loc },
+        { kind: "varDecl", localId: "k.0", init: hasFrom ? ref("from.0") : num(0), loc },
+        ...(hasFrom ? toInt("k.0") : []),
+        { kind: "if", cond: bin(">=", ref("k.0"), ref("n.0")), then: [notFound], else_: null, loc },
+        {
+          kind: "if",
+          cond: bin("<", ref("k.0"), num(0)),
+          then: [
+            assign("k.0", bin("+", ref("n.0"), ref("k.0"), F64)),
+            { kind: "if", cond: bin("<", ref("k.0"), num(0)), then: [assign("k.0", num(0))], else_: null, loc },
+          ],
+          else_: null,
+          loc,
+        },
+        {
+          kind: "for",
+          init: { kind: "varDecl", localId: "i.0", init: ref("k.0"), loc },
+          cond: bin("<", ref("i.0"), ref("n.0")),
+          update: assign("i.0", bin("+", ref("i.0"), num(1), F64)),
+          body: [{ kind: "if", cond: hit(get(ref("i.0"))), then: [found(ref("i.0"))], else_: null, loc }],
+          loc,
+        },
+        notFound,
+      ];
+    }
+  }
+  return { name, params, returnType, locals, body, loc };
+}
+
+/** `x.at(i)` / `indexOf` / `lastIndexOf` / `includes` / `reverse` on a typed array of doubles-valued elements: the interned helper call. Null when the
+ *  call is not one of them or its shape (argument count, spreads) is not the spec's. */
+function lowerBytesLoopCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression, bytesT: IrType & { kind: "bytes" }, loc: SrcLoc): IrExpr | null {
+  const name = access.name.text;
+  if (!bytesNumericElem(bytesT.elem) || call.arguments.some(ts.isSpreadElement)) return null;
+  const nArgs = call.arguments.length;
+  const lens = new Map<string, [number, number]>([["at", [1, 1]], ["indexOf", [1, 2]], ["lastIndexOf", [1, 2]], ["includes", [1, 2]], ["reverse", [0, 0]]]);
+  const want = lens.get(name);
+  if (want === undefined || nArgs < want[0] || nArgs > want[1]) return null;
+  const kind = name as BytesLoopKind;
+  const receiver = L.lowerExpr(access.expression);
+  const args = call.arguments.map((a) => L.lowerExprExpecting(a, F64));
+  let resultT: IrType | null = null;
+  let foundTag = -1;
+  let undefTag = -1;
+  if (kind === "at") {
+    resultT = L.irTypeOf(call);
+    if (resultT.kind !== "union") L.badType(call, L.typeOf(call));
+    foundTag = L.armTag(resultT.unionId, F64);
+    undefTag = L.armTag(resultT.unionId, UNDEFINED_T);
+    if (foundTag < 0 || undefTag < 0) L.badType(call, L.typeOf(call));
+  }
+  const hasFrom = nArgs === 2;
+  const key = `bytes.loop:${kind}:${bytesT.elem}:${hasFrom ? "from" : "nofrom"}`;
+  let helper = L.arrHofHelpers.get(key);
+  if (!helper) {
+    helper = `%bytes.${kind}.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, helper);
+    L.liftedFns.push(buildBytesLoopFn(helper, kind, hasFrom, bytesT, resultT, foundTag, undefTag, loc));
+  }
+  const type = kind === "at" ? resultT! : kind === "includes" ? BOOL : kind === "reverse" ? bytesT : F64;
+  return { kind: "call", callee: helper, args: [receiver, ...args], type, loc };
+}
+
+/** `(a, b) => ...` of the typed-array DEFAULT order over doubles: NaN after every number, -0 before +0, otherwise numeric. */
+function buildFloatDefaultCmpFn(name: string, loc: SrcLoc): IrFunction {
+  const ref = (localId: string): IrExpr => ({ kind: "varRef", localId, type: F64, loc });
+  const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+  const bin = (op: "<" | ">" | "!==" | "===", left: IrExpr, right: IrExpr): IrExpr => ({ kind: "bin", op, left, right, type: BOOL, loc });
+  const ret = (v: number): IrStmt => ({ kind: "return", value: num(v), loc });
+  const negZero = (id: string): IrExpr => bin("<", { kind: "bin", op: "/", left: num(1), right: ref(id), type: F64, loc }, num(0));
+  const body: IrStmt[] = [
+    { kind: "if", cond: bin("!==", ref("a.0"), ref("a.0")), then: [{ kind: "if", cond: bin("!==", ref("b.0"), ref("b.0")), then: [ret(0)], else_: [ret(1)], loc }], else_: null, loc },
+    { kind: "if", cond: bin("!==", ref("b.0"), ref("b.0")), then: [ret(-1)], else_: null, loc },
+    { kind: "if", cond: bin("<", ref("a.0"), ref("b.0")), then: [ret(-1)], else_: null, loc },
+    { kind: "if", cond: bin(">", ref("a.0"), ref("b.0")), then: [ret(1)], else_: null, loc },
+    {
+      kind: "if",
+      cond: bin("===", ref("a.0"), num(0)),
+      then: [
+        { kind: "if", cond: negZero("a.0"), then: [{ kind: "if", cond: negZero("b.0"), then: [ret(0)], else_: [ret(-1)], loc }], else_: [{ kind: "if", cond: negZero("b.0"), then: [ret(1)], else_: null, loc }], loc },
+      ],
+      else_: null,
+      loc,
+    },
+    ret(0),
+  ];
+  return {
+    name,
+    params: [{ localId: "a.0", name: "a", type: F64 }, { localId: "b.0", name: "b", type: F64 }],
+    returnType: F64,
+    locals: [{ id: "a.0", name: "a", type: F64, mutable: false }, { id: "b.0", name: "b", type: F64, mutable: false }],
+    body,
+    loc,
+  };
+}
+
 /** Uint8Array.prototype.toSorted. The receiver/comparator expressions are
  * evaluated before entering the helper; the helper snapshots with
  * TypedArray.prototype.slice before its first comparison, then performs
@@ -3364,12 +3576,37 @@ function lowerInsertedItems(L: Lowerer, args: readonly ts.Expression[], elem: Ir
       // The default order is a subtraction, exact only where there are no
       // NaNs and no signed zero to distinguish.
       if (bytesT.elem === "f32" || bytesT.elem === "f64" || bytesT.elem === "f16") {
-        L.noLowering(
-          `.${method} with no comparator on ${recvName}`,
-          call,
-          "pass a comparator: the default order has to place NaN last and -0 before +0, " +
-            "which a subtraction cannot express",
-        );
+        // The float default order (NaN last, -0 before +0) is a comparator the program never wrote: an interned function minted here and
+        // handed to the same stable merge sort the comparator form runs.
+        let cmpName = L.arrHofHelpers.get("bytes.floatDefaultCmp");
+        if (!cmpName) {
+          cmpName = `%bytes.floatDefaultCmp.${L.arrHofHelpers.size}`;
+          L.arrHofHelpers.set("bytes.floatDefaultCmp", cmpName);
+          L.liftedFns.push(buildFloatDefaultCmpFn(cmpName, loc));
+        }
+        const cmpT = funcOf([F64, F64], F64);
+        const cmp: IrExpr = { kind: "closure", fnName: cmpName, captures: [], type: cmpT, loc };
+        const fkey = `bytes.${method}:${bytesT.elem}:2`;
+        let fhelper = L.arrHofHelpers.get(fkey);
+        if (!fhelper) {
+          fhelper = `%bytes.${method}.${L.arrHofHelpers.size}`;
+          L.arrHofHelpers.set(fkey, fhelper);
+          L.liftedFns.push(buildBytesSortFn(fhelper, 2, true, bytesT, inPlace, loc));
+        }
+        if (!undefinedArg || droppableStatic(undefinedArg)) {
+          return { kind: "call", callee: fhelper, args: [receiver, cmp], type: bytesT, loc };
+        }
+        const fsaved = L.declareHiddenLocal("%bytesSortRecv", bytesT);
+        return {
+          kind: "seqExpr",
+          stmts: [
+            { kind: "varDecl", localId: fsaved.id, init: receiver, loc },
+            { kind: "exprStmt", expr: undefinedArg, loc: undefinedArg.loc },
+          ],
+          result: { kind: "call", callee: fhelper, args: [{ kind: "varRef", localId: fsaved.id, type: bytesT, loc }, cmp], type: bytesT, loc },
+          type: bytesT,
+          loc,
+        };
       }
       const key = `bytes.${method}:${bytesT.elem}:default`;
       let helper = L.arrHofHelpers.get(key);
@@ -8813,7 +9050,11 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
         loc,
       };
     }
-    if ((receiverIr.elem === "u8" || receiverIr.elem === "i64" || receiverIr.elem === "u64") && name === "toSorted") {
+    if (!bytesMemberDeclaredOnBuffer(L, access)) {
+      const looped = lowerBytesLoopCall(L, call, access, receiverIr, loc);
+      if (looped !== null) return looped;
+    }
+    if (receiverIr.elem !== "buf" && name === "toSorted") {
       return lowerBytesToSortedCall(L, call, access, receiverIr, "toSorted");
     }
     // `.sort(cmp?)` at EVERY typed-array width — the SC2020 group-A
@@ -8824,7 +9065,7 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
     if (name === "sort" && receiverIr.elem !== "buf") {
       return lowerBytesToSortedCall(L, call, access, receiverIr, "sort");
     }
-    if (receiverIr.elem === "u8" && name === "toReversed") {
+    if (bytesNumericElem(receiverIr.elem) && name === "toReversed") {
       if (nArgs !== 0) {
         L.noLowering(`.toReversed with ${nArgs} arguments on Uint8Array`, call);
       }
@@ -8837,7 +9078,7 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
         loc,
       };
     }
-    if (receiverIr.elem === "u8" && name === "with") {
+    if (bytesNumericElem(receiverIr.elem) && name === "with") {
       if (nArgs !== 2 || call.arguments.some(ts.isSpreadElement)) {
         L.noLowering(`.with with ${nArgs} arguments on Uint8Array`, call);
       }
@@ -8853,7 +9094,7 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
         loc,
       };
     }
-    if (receiverIr.elem === "u8" && name === "join") {
+    if (bytesNumericElem(receiverIr.elem) && name === "join") {
       if (nArgs > 1 || call.arguments.some(ts.isSpreadElement)) {
         L.noLowering(`.join with ${nArgs} arguments on Uint8Array`, call);
       }
@@ -8967,6 +9208,17 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
       // resolved against the plain Uint8Array interface is JS's
       // Array-toString (comma join), a different operation: fenced.
       const declaredOnBuffer = bytesMemberDeclaredOnBuffer(L, access);
+      if ((receiverIr.elem !== "u8" || !declaredOnBuffer) && bytesNumericElem(receiverIr.elem) && nArgs === 0) {
+        // TypedArray.prototype.toString IS Array.prototype.toString: join with ",".
+        return {
+          kind: "bytesIntrinsic",
+          method: "join",
+          receiver: L.lowerExpr(access.expression),
+          args: [{ kind: "strLit", value: ",", type: STRING, loc }],
+          type: STRING,
+          loc,
+        };
+      }
       if (receiverIr.elem !== "u8" || !declaredOnBuffer) {
         L.noLowering(
           "typed-array toString",
