@@ -37,7 +37,7 @@
  * error propagation both directions, cancel-on-break, flush ordering,
  * utf-8 maximal-subpart replacement, BOM handling, form encoding, header
  * combining/sorting) running under BOTH engines before being embedded. */
-#ifdef SCR_DYNAMIC
+#if defined(SCR_DYNAMIC) || defined(SCR_ENGINE)
 
 #include "scr_runtime.h"
 
@@ -96,21 +96,69 @@ static const char web_prelude[] =
     "    close() { host.clearTimer(this._id); return this; }\n"
     "    [Symbol.toPrimitive]() { return this._id; }\n"
     "  }\n"
-    "  const mkTimer = (fn, ms, args, repeat) => {\n"
-    "    if (typeof fn !== 'function') {\n"
-    "      throw new TypeError('The \"callback\" argument must be of type function. Received type ' + typeof fn);\n"
+    /* Node's ERR_INVALID_ARG_TYPE for a callback that is not a function: the same message and `code`, with the "Received ..." tail Node's
+     * determineSpecificType builds (null/undefined bare, a function by name, an object by constructor, a primitive by type and inspected value). */
+    "  const quoteStr = (v) => {\n"
+    "    const esc = (t, q) => { let o = ''; for (const c of t) { o += c === q ? '\\\\' + c : c === '\\\\' ? '\\\\\\\\' : c === '\\n' ? '\\\\n' : c === '\\t' ? '\\\\t' : c === '\\r' ? '\\\\r' : c === '\\b' ? '\\\\b' : c === '\\f' ? '\\\\f' : c === '\\v' ? '\\\\v' : c < ' ' || c === '\\x7f' ? '\\\\x' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0') : c; } return o; };\n"
+    "    if (!v.includes(\"'\")) return \"'\" + esc(v, \"'\") + \"'\";\n"
+    "    if (!v.includes('\"')) return '\"' + esc(v, '\"') + '\"';\n"
+    "    if (!v.includes('`') && !v.includes('${')) return '`' + esc(v, '`') + '`';\n"
+    "    return \"'\" + esc(v, \"'\") + \"'\";\n"
+    "  };\n"
+    "  const received = (v) => {\n"
+    "    if (v === undefined || v === null) return ' Received ' + v;\n"
+    "    if (typeof v === 'function') return ' Received function ' + v.name;\n"
+    "    if (typeof v === 'object') {\n"
+    "      if (v.constructor && v.constructor.name) return ' Received an instance of ' + v.constructor.name;\n"
+    "      return ' Received [Object: null prototype] {}';\n"
     "    }\n"
+    "    let shown;\n"
+    "    if (typeof v === 'string') { shown = v.length > 28 ? v.slice(0, 25) + '...' : v; shown = quoteStr(shown); }\n"
+    "    else if (typeof v === 'bigint') shown = v + 'n';\n"
+    "    else if (typeof v === 'number' && v === 0 && 1 / v < 0) shown = '-0';\n"
+    "    else shown = String(v);\n"
+    "    return ' Received type ' + typeof v + ' (' + shown + ')';\n"
+    "  };\n"
+    "  const badCallback = (v) => {\n"
+    "    const e = new TypeError('The \"callback\" argument must be of type function.' + received(v));\n"
+    "    e.code = 'ERR_INVALID_ARG_TYPE';\n"
+    "    if (typeof e.stack === 'string') e.stack = e.stack.replace(/^TypeError/, 'TypeError [ERR_INVALID_ARG_TYPE]');\n"
+    "    return e;\n"
+    "  };\n"
+    "  const mkTimer = (fn, ms, args, repeat) => {\n"
+    "    if (typeof fn !== 'function') throw badCallback(fn);\n"
     "    const cb = args.length === 0 ? fn : () => fn(...args);\n"
     "    return new Timeout(cb, ms === undefined ? 1 : Number(ms), repeat);\n"
     "  };\n"
-    "  g.setTimeout = (fn, ms, ...args) => mkTimer(fn, ms, args, false);\n"
-    "  g.setInterval = (fn, ms, ...args) => mkTimer(fn, ms, args, true);\n"
-    "  g.clearTimeout = (t) => {\n"
+    "  g.global = g;\n"
+    "  g.setTimeout = function setTimeout(fn, ms, ...args) { return mkTimer(fn, ms, args, false); };\n"
+    "  g.setInterval = function setInterval(fn, ms, ...args) { return mkTimer(fn, ms, args, true); };\n"
+    "  const clearT = (t) => {\n"
     "    if (t === undefined || t === null) return;\n"
     "    const id = typeof t === 'number' ? t : Number(t);\n"
     "    if (Number.isFinite(id)) host.clearTimer(id);\n"
     "  };\n"
-    "  g.clearInterval = g.clearTimeout;\n"
+    "  g.clearTimeout = function clearTimeout(t) { return clearT(t); };\n"
+    "  g.clearInterval = function clearInterval(t) { return clearT(t); };\n"
+    /* setImmediate / clearImmediate over the static check phase (scr_set_immediate): FIFO once per loop turn after due timers, in the
+     * same queue the static setImmediate uses. The Immediate object mirrors Node's: ref/unref/hasRef, no numeric form. */
+    "  class Immediate {\n"
+    "    constructor(fn) { this._reffed = true; this._id = host.setImmediate(fn); }\n"
+    "    ref() { this._reffed = true; host.refImmediate(this._id, true); return this; }\n"
+    "    unref() { this._reffed = false; host.refImmediate(this._id, false); return this; }\n"
+    "    hasRef() { return this._reffed; }\n"
+    "    [Symbol.dispose]() { host.clearImmediate(this._id); }\n"
+    "  }\n"
+    "  g.setImmediate = function setImmediate(fn, ...args) {\n"
+    "    if (typeof fn !== 'function') throw badCallback(fn);\n"
+    "    return new Immediate(args.length === 0 ? fn : () => fn(...args));\n"
+    "  };\n"
+    "  g.clearImmediate = function clearImmediate(t) { if (t instanceof Immediate) host.clearImmediate(t._id); };\n"
+    "  const nativeQM = g.queueMicrotask;\n"
+    "  g.queueMicrotask = function queueMicrotask(cb) {\n"
+    "    if (typeof cb !== 'function') throw badCallback(cb);\n"
+    "    nativeQM(cb);\n"
+    "  };\n"
     "\n"
     "  class ReadableStream {\n"
     "    constructor(source, _strategy) {\n"
@@ -1648,6 +1696,46 @@ static JSValue web_host_ref_timer(JSContext *ctx, JSValueConst this_val,
 static JSValue web_host_timer_has_ref(JSContext *ctx, JSValueConst this_val,
                                       int argc, JSValueConst *argv) {
   (void)this_val;
+static JSValue web_host_set_immediate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  WebTimerFn *h = malloc(sizeof *h);
+  if (!h) {
+    fprintf(stderr, "scriptc: out of memory\n");
+    abort();
+  }
+  h->rc = 1;
+  h->ctx = ctx;
+  h->fn = JS_DupValue(ctx, argv[0]);
+  ScrBox *box = scr_box_new_obj(web_timerfn_retain, web_timerfn_release, NULL);
+  scr_box_set_ref(box, h); /* the box owns the +1 */
+  ScrClosure *cb = scr_closure_new((void *)web_timer_fire_cb, 1);
+  cb->caps[0] = box;
+  return JS_NewFloat64(ctx, scr_set_immediate(cb));
+}
+
+static JSValue web_host_clear_immediate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  double id = 0;
+  if (JS_ToFloat64(ctx, &id, argv[0])) return JS_EXCEPTION;
+  scr_clear_immediate(id);
+  return JS_UNDEFINED;
+}
+
+static JSValue web_host_ref_immediate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  double id = 0;
+  if (JS_ToFloat64(ctx, &id, argv[0])) return JS_EXCEPTION;
+  if (JS_ToBool(ctx, argv[1]) > 0) {
+    scr_immediate_ref(id);
+  } else {
+    scr_immediate_unref(id);
+  }
+  return JS_UNDEFINED;
+}
+
   (void)argc;
   double id = 0;
   if (JS_ToFloat64(ctx, &id, argv[0])) return JS_EXCEPTION;
@@ -1844,4 +1932,11 @@ void scr_island_web_boot(void *jsctx) {
   JS_FreeValue(ctx, r);
 }
 
-#endif /* SCR_DYNAMIC */
+#endif /* SCR_DYNAMIC || SCR_ENGINE */
+  JS_SetPropertyStr(ctx, host, "setImmediate", JS_NewCFunction(ctx, web_host_set_immediate, "setImmediate", 1));
+  JS_SetPropertyStr(ctx, host, "clearImmediate", JS_NewCFunction(ctx, web_host_clear_immediate, "clearImmediate", 1));
+  JS_SetPropertyStr(ctx, host, "refImmediate", JS_NewCFunction(ctx, web_host_ref_immediate, "refImmediate", 2));
+#ifndef SCR_DYNAMIC
+  /* The engine-only build: the web prelude's String()-formatted console gives way to the engine console (Node's own formatting). */
+  isl_console_boot(jsctx);
+#endif
