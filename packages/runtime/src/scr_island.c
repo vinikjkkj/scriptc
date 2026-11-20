@@ -339,11 +339,22 @@ static void isl_rejection_tracker(JSContext *ctx, JSValueConst promise,
 /* The report hook (scr_async.c calls it inside
  * scr_report_unhandled_rejections): print the first survivor when the
  * static ledger was silent, free the whole ledger either way. */
+static ScrStr *isl_reason_text(JSValueConst reason);
 static bool isl_report_rejections(bool print) {
   if (isl_rejections == NULL) return false;
   if (print) {
     fflush(stdout);
     fputs("Unhandled promise rejection: ", stderr);
+    /* A reason that is no Error: Node's UnhandledPromiseRejection message names it (isl_reason_text); an Error keeps String(reason). */
+    ScrStr *why = isl_reason_text(isl_rejections->reason);
+    if (why != NULL) {
+      fputs("UnhandledPromiseRejection: This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). The promise rejected with the reason \"", stderr);
+      fwrite(why->data, 1, why->len, stderr);
+      fputs("\".", stderr);
+      scr_str_release(why);
+      fputc('\n', stderr);
+      goto isl_reported;
+    }
     const char *msg = JS_ToCString(isl_ctx, isl_rejections->reason);
     if (msg) {
       fputs(msg, stderr);
@@ -357,6 +368,7 @@ static bool isl_report_rejections(bool print) {
     }
     fputc('\n', stderr);
   }
+isl_reported:
   while (isl_rejections) {
     IslRejection *r = isl_rejections;
     isl_rejections = r->next;
@@ -396,10 +408,32 @@ enum {
   ISL_H_ISENUM,
 #endif
   ISL_H_GOPD,
+  ISL_H_REASON,
   ISL_H_COUNT,
 };
 
 static JSValue isl_helpers[ISL_H_COUNT];
+
+static ScrStr *isl_js_to_str(JSValueConst v);
+/* The text the reason is named by in Node's UnhandledPromiseRejection message (ISL_H_REASON), +1, or NULL for an Error or an unreadable value. */
+static ScrStr *isl_reason_text(JSValueConst reason) {
+  JSValue arg = JS_DupValue(isl_ctx, reason);
+  JSValue r = JS_Call(isl_ctx, isl_helpers[ISL_H_REASON], JS_UNDEFINED, 1, &arg);
+  JS_FreeValue(isl_ctx, arg);
+  if (JS_IsException(r)) {
+    JSValue ex = JS_GetException(isl_ctx);
+    JS_FreeValue(isl_ctx, ex);
+    return NULL;
+  }
+  ScrStr *out = NULL;
+  if (JS_IsString(r)) out = isl_js_to_str(r);
+  JS_FreeValue(isl_ctx, r);
+  return out;
+}
+
+/* A dyn that wraps an engine value: the same text (scr_json.c's reader asks through this hook). */
+extern ScrStr *(*scr_island_reason_text_fn)(const ScrDyn *jsval);
+
 
 /* ISL_H_DESTRCHECK / ISL_H_ITERN are the destructuring guards: the check
  * throws V8's EXACT RequireObjectCoercible TypeError text ("Cannot
@@ -475,6 +509,17 @@ static const char isl_prelude[] =
 #endif
     /* ISL_H_GOPD: Object.getOwnPropertyDescriptor over a wrapped receiver, the engine's own answer */
     ",(o,k)=>Object.getOwnPropertyDescriptor(o,k)"
+    /* ISL_H_REASON: V8's NoSideEffectsToString of an unhandled-rejection reason (what Node's UnhandledPromiseRejection message names), or
+     * null for an Error (reported as the error). Strings are themselves, other primitives their String(), a function its source text, a
+     * receiver "#<ConstructorName>" when its toString is Object.prototype.toString and "[object Tag]" otherwise. */
+    ",(v)=>{switch(typeof v){case 'string':return v;case 'symbol':return v.toString();"
+    "case 'function':return Function.prototype.toString.call(v);"
+    "case 'object':if(v===null)return 'null';if(v instanceof Error)return null;"
+    "{let ts;try{ts=v.toString}catch(e){}"
+    "if(ts===Object.prototype.toString){let c;try{c=v.constructor}catch(e){}"
+    "const n=c&&typeof c.name==='string'&&c.name?c.name:'Object';return '#<'+n+'>'}"
+    "return '[object '+Object.prototype.toString.call(v).slice(8,-1)+']'}"
+    "default:return String(v)}}"
     "]";
 
 static void isl_free_boot(void);
@@ -591,6 +636,8 @@ static bool isl_walk_builtins_intact(int mode) {
   return ok;
 }
 
+static ScrStr *isl_dyn_reason_text(const ScrDyn *d);
+
 static void isl_init(void) {
   isl_rt = JS_NewRuntime2(&isl_mf, NULL);
   if (!isl_rt) {
@@ -630,6 +677,7 @@ static void isl_init(void) {
    * Node. The report hook drains engine jobs first so a same-checkpoint
    * handler attachment gets its chance to rescind. */
   JS_SetHostPromiseRejectionTracker(isl_rt, isl_rejection_tracker, NULL);
+  scr_island_reason_text_fn = isl_dyn_reason_text;
   scr_loop_set_island_rejections(isl_report_rejections,
                                  scr_island_drain_jobs);
   /* Armed island timers (AbortSignal.timeout) cap the loop's idle sleep
@@ -932,6 +980,7 @@ struct ScrJsval {
   JSValue v;
   struct ScrJsval *cells_prev, *cells_next;
 };
+static ScrStr *isl_dyn_reason_text(const ScrDyn *d) { return isl_reason_text(d->v.jsval.cell->v); }
 
 static ScrJsval *isl_cells = NULL;
 

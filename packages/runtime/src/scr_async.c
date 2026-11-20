@@ -4301,6 +4301,10 @@ void scr_loop_set_island_rejections(bool (*fn)(bool print),
  * listener threw (the uncaught crash path). */
 bool (*scr_urj_deliver_fn)(ScrPromise *p) = NULL;
 
+/* The dyn unit's reading of a settled payload for the default report (scr_urj_reason.c installs it; NULL when that gated unit is not linked): the text V8's NoSideEffectsToString gives the
+ * reason Node names in its UnhandledPromiseRejection message, +1, or NULL for a payload it cannot read (then the report keeps "[object]"). */
+ScrStr *(*scr_urj_reason_fn)(void *payload, void *(*retain)(void *)) = NULL;
+
 /* Unhandled rejections at a completed nextTick/microtask checkpoint:
  * Node prints an error and exits 1 when no listener handles the event.
  * Snapshot the ledger: a listener can reject another promise, but that
@@ -4353,6 +4357,29 @@ bool scr_report_unhandled_rejections(void) {
         any = true;
         fflush(stdout);
         fputs("Unhandled promise rejection: ", stderr);
+        /* A reason that is no Error: Node reports an UnhandledPromiseRejection whose message names the reason (its report's `Name: message`
+         * line), not the reason itself. */
+        ScrStr *why = NULL;
+        const char *plain = NULL;
+        char numbuf[32];
+        switch (p->payload_kind) {
+        case SCR_EXC_F64: scr_f64_to_str(p->f64 == 0 ? 0.0 : p->f64, numbuf); plain = numbuf; break;
+        case SCR_EXC_BOOL: plain = p->b ? "true" : "false"; break;
+        case SCR_EXC_STR: plain = ((ScrStr *)p->payload)->data; break;
+        case SCR_EXC_OBJ:
+          if (scr_error_is(p->payload)) break;
+          /* fall through */
+        default:
+          if (scr_urj_reason_fn != NULL) why = scr_urj_reason_fn(p->payload, PV(p)->retain);
+          break;
+        }
+        if (plain != NULL || why != NULL) {
+          fputs("UnhandledPromiseRejection: This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). The promise rejected with the reason \"", stderr);
+          if (why != NULL) fwrite(why->data, 1, why->len, stderr); else fputs(plain, stderr);
+          fputs("\".\n", stderr);
+          if (why != NULL) scr_str_release(why);
+          goto urj_reported;
+        }
         switch (p->payload_kind) {
         case SCR_EXC_F64: {
           char buf[32];
@@ -4374,6 +4401,7 @@ bool scr_report_unhandled_rejections(void) {
         default: fputs("[object]", stderr); break;
         }
         fputc('\n', stderr);
+      urj_reported:;
       }
     }
     scr_promise_release(p);

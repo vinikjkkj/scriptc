@@ -152,7 +152,7 @@ const RUNTIME_UNIT_DEPS_DYNAMIC: Readonly<Record<string, readonly string[]>> = {
   "scr_fetch.c": ["scr_http.c", "scr_island.c", "scr_net.c", "scr_net_island.c", "scr_tls.c", "scr_url.c"],
   "scr_fetch_curl.c": ["scr_island.c"],
   "scr_inspect_island.c": ["scr_inspect.c", "scr_island.c"],
-  "scr_island.c": ["scr_url.c", "scr_web.c"],
+  "scr_island.c": ["scr_url.c", "scr_urj_reason.c", "scr_web.c"],
   "scr_net_island.c": ["scr_http.c", "scr_island.c", "scr_net.c", "scr_tls.c"],
   "scr_regex.c": ["scr_island.c"],
   "scr_web.c": ["scr_island.c"],
@@ -659,6 +659,9 @@ export interface CcOptions {
   /** The program reaches Object.getPrototypeOf / Object.prototype / Object(x) over a dyn / `Object` as a value (moduleUsesDynProto):
    * compiles scr_dyn_proto.c, the prototype sentinels, wrapper objects and builtin function values. */
   dynProto?: boolean;
+  /** The program has a promise rejection path and holds dyn values (moduleUsesUrjReason): compiles scr_urj_reason.c, the reader that names a
+   * non-scalar rejection reason in the unhandled-rejection report. Always linked beside the engine. */
+  urjReason?: boolean;
   /** The program lowers Object.getOwnPropertyDescriptor over a dyn receiver (moduleUsesDynGopd): compiles scr_dyn_gopd.c. */
   dynGopd?: boolean;
   /** The program lowers Object.getOwnPropertyDescriptor over an untyped key (moduleUsesDynGopdAny): compiles scr_dyn_gopd_any.c beside the string and symbol units. */
@@ -2949,6 +2952,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       : []),
     ...(opaqueUnit ? [rt(join(rtDir, "scr_opaque.c"))] : []),
     ...(dynProtoUnit ? [rt(join(rtDir, "scr_dyn_proto.c"))] : []),
+    ...((opts.urjReason ?? false) || (engineArchive && (engineOnly || dynamic)) ? [rt(join(rtDir, "scr_urj_reason.c"))] : []),
     ...(dynGopdUnit ? [rt(join(rtDir, "scr_dyn_gopd.c"))] : []),
     ...(dynGopdAnyUnit ? [rt(join(rtDir, "scr_dyn_gopd_any.c"))] : []),
     // The WebRTC data-channel handles. Ownership pairs only for now; the
