@@ -18152,6 +18152,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26318-dyn-typed-array-methods-keep-every-element-width-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26318-dyn-typed-array-methods-keep-every-element-width-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2632-dyn-jsval-iterate.js": {
    "order": [
     "<repo>/tests/corpus/2632-dyn-jsval-iterate.js"
