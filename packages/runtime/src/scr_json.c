@@ -22,6 +22,7 @@
  *   serializers (and the error messages here).
  */
 #include "scr_runtime.h"
+#include "scr_cyc_pass.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -639,6 +640,8 @@ __attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_i
  * edge is uncollectable (what the whole tree was before this change),
  * whereas a traced edge the teardown also releases is a double free. */
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
+static void scr_dyn_trace_mg(void *o);
+static void scr_dyn_trace_sb(void *o);
 static size_t dyn_origin_ntraced;
 static void dyn_origin_trace(ScrDyn *d, ScrTraceVisit visit, void *ctx);
 static void dyn_origin_forget_x(ScrDyn *d, bool from_collector);
@@ -732,7 +735,11 @@ void scr_throw_dyn(ScrDyn *v) {
 static __attribute__((noinline)) ScrDyn *scr_dyn_alloc_fresh(ScrDynKind kind) {
   /* The dyn node's kind index is a reserved one (SCR_CYC_KIND_DYN), so the collector can call scr_dyn_trace directly. */
   static uint16_t dyn_ck;
-  if (__builtin_expect(dyn_ck == 0, 0)) dyn_ck = scr_cyc_kind_fixed(SCR_CYC_KIND_DYN, &scr_dyn_trace, &scr_dyn_gcfree);
+  if (__builtin_expect(dyn_ck == 0, 0)) {
+    dyn_ck = scr_cyc_kind_fixed(SCR_CYC_KIND_DYN, &scr_dyn_trace, &scr_dyn_gcfree);
+    scr_cyc_dyn_mg = &scr_dyn_trace_mg;
+    scr_cyc_dyn_sb = &scr_dyn_trace_sb;
+  }
   ScrDyn *fresh = scr_cyc_alloc_k(scr_dyn_node_bytes(kind), dyn_ck);
   fresh->rc = 1;
   fresh->kind = kind;
@@ -826,34 +833,43 @@ ScrDyn *scr_dyn_alloc_proxy(void) { return scr_dyn_alloc(SCR_DYN_PROXY); }
 
 /* The traced children: every one is a ScrDyn or a ScrClosure, so every one
  * carries a header (or is immortal, which the visit filter skips). */
+/* The edges after the element / member loop, once per node and out of line, so the two phase instances below carry only the loops (the hot part: one visit per
+ * element or member) and not a copy of the whole trace. Called with the generic visitor of the phase. */
+static __attribute__((noinline)) void scr_dyn_trace_arr_tail(ScrDyn *d, ScrTraceVisit visit, void *ctx) {
+  /* the named-property table of an exec result / expando'd array */
+  visit(scr_dyn_ext(d)->extras, ctx);
+  if (d->static_copy && dyn_origin_ntraced != 0) dyn_origin_trace(d, visit, ctx);
+#ifdef SCR_SYMTAB
+  if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
+#endif
+}
+static __attribute__((noinline)) void scr_dyn_trace_obj_tail(ScrDyn *d, ScrTraceVisit visit, void *ctx) {
+  /* The [[Prototype]] link and the non-enumerable/ACCESSOR table. The
+   * table is where a getter/setter pair lives (an OBJ dyn of ARR dyn
+   * entries holding two FUNC dyns), which is the edge that makes an
+   * accessor descriptor collectible at all. Both are NULL-tolerant. */
+  visit(scr_dyn_ext(d)->proto, ctx);
+  visit(scr_dyn_ext(d)->hidden, ctx);
+  /* scriptc's internal-slot table: an ordinary OBJ dyn holding ordinary
+   * dyn values, so a cycle through one collects like any other. */
+  visit(scr_dyn_ext(d)->slots, ctx);
+  if (d->static_copy && dyn_origin_ntraced != 0) dyn_origin_trace(d, visit, ctx);
+#ifdef SCR_SYMTAB
+  if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
+#endif
+}
+
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrDyn *d = (ScrDyn *)o;
   switch (d->kind) {
   case SCR_DYN_ARR:
     for (size_t i = 0; i < d->v.arr.len; i++) visit(d->v.arr.items[i], ctx);
-    /* the named-property table of an exec result / expando'd array */
-    visit(scr_dyn_ext(d)->extras, ctx);
-    if (d->static_copy && dyn_origin_ntraced != 0) dyn_origin_trace(d, visit, ctx);
-#ifdef SCR_SYMTAB
-    if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
-#endif
+    scr_dyn_trace_arr_tail(d, visit, ctx);
     break;
   case SCR_DYN_OBJ:
     for (size_t i = 0; i < d->v.obj.len; i++)
       if (!d->v.obj.entries[i].value_borrowed) visit(d->v.obj.entries[i].value, ctx);
-    /* The [[Prototype]] link and the non-enumerable/ACCESSOR table. The
-     * table is where a getter/setter pair lives (an OBJ dyn of ARR dyn
-     * entries holding two FUNC dyns), which is the edge that makes an
-     * accessor descriptor collectible at all. Both are NULL-tolerant. */
-    visit(scr_dyn_ext(d)->proto, ctx);
-    visit(scr_dyn_ext(d)->hidden, ctx);
-    /* scriptc's internal-slot table: an ordinary OBJ dyn holding ordinary
-     * dyn values, so a cycle through one collects like any other. */
-    visit(scr_dyn_ext(d)->slots, ctx);
-    if (d->static_copy && dyn_origin_ntraced != 0) dyn_origin_trace(d, visit, ctx);
-#ifdef SCR_SYMTAB
-    if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
-#endif
+    scr_dyn_trace_obj_tail(d, visit, ctx);
     break;
   case SCR_DYN_FUNC:
     visit(scr_dyn_fn_clo(d), ctx);
@@ -874,6 +890,29 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
             * nothing traced (see scr_dyn_alloc) */
   }
 }
+
+/* The trace with markGray's / scanBlack's visit inlined in the element and member loops (scr_cyc_mg_one / scr_cyc_sb_one, the text the generic visitors in
+ * scr_cycle.c run); every other edge, and every other kind, goes through the generic trace with that phase's generic visitor. The loops' children are dyn nodes
+ * by construction (known_dyn = 1). */
+#define SCR_DYN_TRACE_PHASE(NAME, ONE, FN) \
+  static void NAME(void *o) { \
+    ScrDyn *d = (ScrDyn *)o; \
+    ScrTraceVisit fv_ = FN; \
+    __asm__ volatile("" : "+r"(fv_)); /* hides the constant: the tails stay ONE out-of-line copy, not a clone per phase */ \
+    if (d->kind == SCR_DYN_ARR) { \
+      for (size_t i = 0; i < d->v.arr.len; i++) ONE(d->v.arr.items[i], 1); \
+      scr_dyn_trace_arr_tail(d, fv_, NULL); \
+    } else if (d->kind == SCR_DYN_OBJ) { \
+      for (size_t i = 0; i < d->v.obj.len; i++) \
+        if (!d->v.obj.entries[i].value_borrowed) ONE(d->v.obj.entries[i].value, 1); \
+      scr_dyn_trace_obj_tail(d, fv_, NULL); \
+    } else { \
+      scr_dyn_trace(o, fv_, NULL); \
+    } \
+  }
+SCR_DYN_TRACE_PHASE(scr_dyn_trace_mg, scr_cyc_mg_one, scr_cyc_mg_visit_fn)
+SCR_DYN_TRACE_PHASE(scr_dyn_trace_sb, scr_cyc_sb_one, scr_cyc_sb_visit_fn)
+#undef SCR_DYN_TRACE_PHASE
 
 void scr_dyn_trace_v(void *o, ScrTraceVisit visit, void *ctx) {
   scr_dyn_trace(o, visit, ctx);

@@ -40,13 +40,13 @@
  * A/A floor. The depth is the reason it is here.
  */
 #include "scr_runtime.h"
+#include "scr_cyc_pass.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Every heap object's first member is `size_t rc`. */
-#define SCR_RC(obj) (*(size_t *)(obj))
+/* Every heap object's first member is `size_t rc` (SCR_RC, scr_cyc_pass.h). */
 
 /* The knobs of this file are read once each, through one shared reader: the getenv-and-strtol pair, inlined at every site, was the largest part of the file's
  * always-linked cold text. */
@@ -2232,9 +2232,6 @@ void scr_cyc_on_release(void *obj) {
 
 /* ── trial deletion ───────────────────────────────────────────────────── */
 
-/* Child filter shared by every phase: nothing to do for NULL (unassigned
- * slots) or immortal (interned statics have no header at all). */
-#define SCR_CYC_SKIP(child) ((child) == NULL || SCR_RC(child) == SIZE_MAX)
 
 /* The gathered white set (freed after the walk completes). */
 static void **scr_white = NULL;
@@ -2292,27 +2289,16 @@ static size_t scr_nwhite = 0, scr_white_cap = 0;
  *   scanBlack nests INSIDE scan on the same stack, bounded by the mark it
  *   took on entry. It cannot escape below that mark, so the outer phase's
  *   pending nodes are untouched. */
-static void **scr_wl = NULL;
-static size_t scr_wl_n = 0, scr_wl_cap = 0;
+void **scr_wl = NULL;
+size_t scr_wl_n = 0, scr_wl_cap = 0;
+ScrCycDynPassFn scr_cyc_dyn_mg = NULL, scr_cyc_dyn_sb = NULL;
 
-static void scr_wl_push(void *obj) {
-  if (scr_wl_n == scr_wl_cap) {
-    scr_wl_cap = scr_wl_cap ? scr_wl_cap * 2 : 256;
-    scr_wl = realloc(scr_wl, scr_wl_cap * sizeof *scr_wl);
-    if (!scr_wl) scr_cyc_oom();
-  }
-  scr_wl[scr_wl_n++] = obj;
+__attribute__((noinline)) void scr_wl_grow(void) {
+  scr_wl_cap = scr_wl_cap ? scr_wl_cap * 2 : 256;
+  scr_wl = realloc(scr_wl, scr_wl_cap * sizeof *scr_wl);
+  if (!scr_wl) scr_cyc_oom();
 }
 
-static void scr_mg_visit(void *child, void *ctx) {
-  (void)ctx;
-  if (SCR_CYC_SKIP(child)) return;
-  SCR_RC(child) -= 1; /* trial-delete this internal edge */
-  ScrCycHdr *h = scr_cyc_hdr(child);
-  if (h->color == SCR_CYC_GRAY) return;
-  h->color = SCR_CYC_GRAY;
-  scr_wl_push(child);
-}
 static void scr_mark_gray(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   size_t floor = scr_wl_n;
@@ -2321,19 +2307,12 @@ static void scr_mark_gray(void *obj) {
   scr_wl_push(obj);
   while (scr_wl_n > floor) {
     void *o = scr_wl[--scr_wl_n];
-    scr_cyc_trace_call(scr_cyc_hdr(o), o, scr_mg_visit, NULL);
+    const ScrCycHdr *oh = scr_cyc_hdr(o);
+    if (oh->kind_lo == SCR_CYC_KIND_DYN) scr_cyc_dyn_mg(o);
+    else scr_cyc_trace_call(oh, o, scr_cyc_mg_visit_fn, NULL);
   }
 }
 
-static void scr_sb_visit(void *child, void *ctx) {
-  (void)ctx;
-  if (SCR_CYC_SKIP(child)) return;
-  SCR_RC(child) += 1; /* restore the trial decrement */
-  ScrCycHdr *h = scr_cyc_hdr(child);
-  if (h->color == SCR_CYC_BLACK) return;
-  h->color = SCR_CYC_BLACK;
-  scr_wl_push(child);
-}
 /* NOT always_inline: inlined into the scan phase it grew scr_collect_cycles by about 150 bytes and measured slower on redis (v4); out of line it is one call per black subtree. */
 static __attribute__((noinline)) void scr_scan_black(void *obj) {
   size_t floor = scr_wl_n;
@@ -2341,7 +2320,9 @@ static __attribute__((noinline)) void scr_scan_black(void *obj) {
   scr_wl_push(obj);
   while (scr_wl_n > floor) {
     void *o = scr_wl[--scr_wl_n];
-    scr_cyc_trace_call(scr_cyc_hdr(o), o, scr_sb_visit, NULL);
+    const ScrCycHdr *oh = scr_cyc_hdr(o);
+    if (oh->kind_lo == SCR_CYC_KIND_DYN) scr_cyc_dyn_sb(o);
+    else scr_cyc_trace_call(oh, o, scr_cyc_sb_visit_fn, NULL);
   }
 }
 
