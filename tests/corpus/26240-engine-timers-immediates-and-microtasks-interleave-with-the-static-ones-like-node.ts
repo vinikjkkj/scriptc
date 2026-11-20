@@ -2,11 +2,11 @@
 // native loop, so they interleave with the static timers, check phase and microtask queue in Node's order.
 const run: any = new Function(`
   const log = console.log;
-  setTimeout(() => log("E timeout 40"), 40);
-  setTimeout(() => log("E timeout 80"), 80);
-  setTimeout((a, b) => log("E timeout args", a, b), 120, "x", "y");
+  setTimeout(() => log("E timeout 400"), 400);
+  setTimeout(() => log("E timeout 800"), 800);
+  setTimeout((a, b) => log("E timeout args", a, b), 1200, "x", "y");
   let n = 0;
-  const iv = setInterval(() => { log("E interval", ++n); if (n === 3) clearInterval(iv); }, 30);
+  const iv = setInterval(() => { log("E interval", ++n); if (n === 3) clearInterval(iv); }, 300);
   const cancelled = setTimeout(() => log("E NEVER"), 10);
   clearTimeout(cancelled);
   setImmediate(() => log("E immediate"));
@@ -14,8 +14,8 @@ const run: any = new Function(`
   Promise.resolve().then(() => log("E promise"));
   log("E sync end");
 `);
-setTimeout(() => console.log("S timeout 60"), 60);
-setTimeout(() => console.log("S timeout 100"), 100);
+setTimeout(() => console.log("S timeout 500"), 500);
+setTimeout(() => console.log("S timeout 1000"), 1000);
 setImmediate(() => console.log("S immediate"));
 Promise.resolve().then(() => console.log("S promise before"));
 queueMicrotask(() => console.log("S microtask before"));

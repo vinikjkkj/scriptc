@@ -1,9 +1,8 @@
-// assert, trace and the timer/count label warnings go to stderr (not compared here); stdout shows the program ran on.
+// assert and the timer/count label warnings go to stderr (console.trace is not in this row: Node prints its frames with file paths, which no binary can match); stdout shows the program ran on.
 const run: any = new Function(`
   console.assert(true, "silent");
   console.assert(false, "boom %s", "x");
   console.assert(false);
-  console.trace("where", 1);
   console.timeEnd("nope");
   console.timeLog("nope");
   console.countReset("nope");
