@@ -52,13 +52,11 @@ static int hooks_set;
 static pthread_t main_thread;
 static int callbacks_drained;
 
-void scr_loop_set_pool(bool (*pending)(void), void (*dispatch)(void), int (*pollfd)(void),
-                       bool (*wait)(double ms), void (*teardown)(void)) {
-  (void)wait;
-  hook_pending = pending;
-  hook_dispatch = dispatch;
-  hook_pollfd = pollfd;
-  hook_teardown = teardown;
+void scr_loop_set_pool(const ScrPoolHooks *hooks) {
+  hook_pending = hooks->pending;
+  hook_dispatch = hooks->dispatch;
+  hook_pollfd = hooks->pollfd;
+  hook_teardown = hooks->teardown;
   hooks_set++;
 }
 void scr_loop_drain_callback(void) { callbacks_drained++; }
