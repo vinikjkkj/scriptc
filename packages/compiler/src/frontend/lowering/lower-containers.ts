@@ -6,6 +6,7 @@ import { programHasPrimSubclass } from "./prim-subclass-gate.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { fillWithKeyList } from "./key-list-fill.js";
+import { collatorModeOf } from "./lower-collator.js";
 import { canBoxFuncIntoDyn, canConvertToDyn, isRuntimeRootedClassName, strandTrap } from "../../ir/nodes.js";
 import { isProvenBufferRefinement } from "../buffer-refinement.js";
 import { codecGlobalName } from "../codec-shadow.js";
@@ -8054,17 +8055,22 @@ function staticNumberOf(L: Lowerer, node: ts.Expression): number | null {
     if (receiverIr?.kind !== "string") return null;
     if (!L.isStdlibMember(access)) return null;
     const loc = locOf(call);
-    if (call.arguments.length !== 1) {
+    if (call.arguments.length < 1 || call.arguments.length > 3 || call.arguments.some((a) => ts.isSpreadElement(a))) {
       L.noLowering(
         `.localeCompare with ${call.arguments.length} arguments`,
         call,
-        "the locales/options parameters select ICU collations that have no lowering — " +
-          "pass exactly the comparison string",
+        "pass the comparison string, then optionally literal locales and options",
       );
     }
+    // locales / options: a collator known at compile time folds to one mode number (lower-collator.ts); anything the root engine cannot
+    // serve (a tailored language, a collation type, a non-literal locale) is a named compile-time refusal.
+    const mode = call.arguments.length > 1 ? collatorModeOf(L, call.arguments[1], call.arguments[2], call) : null;
     const receiver = L.lowerExpr(access.expression);
     const arg = L.lowerExpr(call.arguments[0]!);
     if (arg.type.kind !== "string") L.badType(call.arguments[0]!, L.typeOf(call.arguments[0]!));
+    if (mode !== null && mode !== 3) {
+      return { kind: "strIntrinsic", method: "localeCompareMode", receiver, args: [arg, { kind: "numLit", value: mode, type: F64, loc }], type: F64, loc };
+    }
     return { kind: "strIntrinsic", method: "localeCompare", receiver, args: [arg], type: F64, loc };
   }
 
