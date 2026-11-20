@@ -7,15 +7,6 @@ dynamic-representable-types.ts:12:7 - error SC2011: values of type 'any[][]' hav
 
   hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
 
-dynamic-representable-types.ts:12:23 - error SC2011: values of type 'any[]' have no static representation but run in the embedded dynamic engine, which this build does not include (the static mapping refuses: any[] > any)
-
-  11 | const rec = { workItem: {} as any, width: "10px" }; // compiles: an any member of a record literal in an unannotated variable is the checked-dynamic slot
-  12 | const pairs = arr.map((x, i) => [i, x]); // any[][] from a CALL: still no static representation
-     |                       ^~~~~~~~~~~~~~~~
-  13 | const fn: (v: any) => string = (v) => String(v);
-
-  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
-
 dynamic-representable-types.ts:16:36 - error SC2020: 'any[][].length' is part of the standard library types but has no scriptc lowering yet
 
   15 | const optTuple: [number, string?] = [1];
