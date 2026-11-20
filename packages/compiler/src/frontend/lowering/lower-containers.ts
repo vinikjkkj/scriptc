@@ -12,6 +12,7 @@ import { isProvenBufferRefinement } from "../buffer-refinement.js";
 import { codecGlobalName } from "../codec-shadow.js";
 import { WHATWG_LABEL_TO_ENCODING } from "../text-codec-labels.js";
 import { BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { lowerNumberLocaleFormat } from "./lower-numfmt.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { checkedArmBridge, lowerUnionContainerDispatch, captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
@@ -3738,6 +3739,61 @@ function lowerBytesIterDrainCall(L: Lowerer, call: ts.CallExpression, access: ts
     });
   }
   return { kind: "call", callee: helper, args: [receiver], type: outT, loc };
+}
+
+/** `x.toLocaleString(locales?, options?)` on a typed array: the elements formatted by Number.prototype.toLocaleString (BigInt's for the bigint views), joined
+ *  with ",". A lifted loop over the same libCall the scalar lowering mints: the locale and option expressions are lowered once at the call site (probed through
+ *  the scalar lowering with a placeholder value) and ride into the helper as parameters. */
+function lowerBytesToLocaleStringCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression, bytesT: IrType & { kind: "bytes" }, loc: SrcLoc): IrExpr | null {
+  if (access.name.text !== "toLocaleString" || bytesT.elem === "buf") return null;
+  if (call.arguments.length > 2 || call.arguments.some(ts.isSpreadElement)) {
+    L.noLowering(`.toLocaleString with ${call.arguments.length} arguments on typed arrays`, call);
+  }
+  const valT = bytesValueType(bytesT.elem);
+  const receiver = L.lowerExpr(access.expression);
+  const probe = lowerNumberLocaleFormat(L, { kind: "varRef", localId: "%none", type: valT, loc }, call.arguments[0], call.arguments[1], loc);
+  if (probe.kind !== "libCall") L.badType(call, L.typeOf(call));
+  const extra = probe.args.slice(1);
+  const key = `bytes.tls:${bytesT.elem}:${probe.fn}:${extra.map((e) => typeKey(e.type)).join(",")}`;
+  let helper = L.arrHofHelpers.get(key);
+  if (!helper) {
+    helper = `%bytes.toLocaleString.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, helper);
+    const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const cat = (l: IrExpr, r: IrExpr): IrExpr => ({ kind: "strConcat", left: l, right: r, type: STRING, loc });
+    const get: IrExpr = { kind: "bytesIntrinsic", method: "get", receiver: ref("a.0", bytesT), args: [ref("i.0", F64)], type: valT, loc };
+    const first: IrExpr = valT === BIGINT ? { kind: "libCall", fn: "big.str", args: [get, num(10)], type: STRING, loc } : get;
+    const piece: IrExpr = { kind: "libCall", fn: probe.fn, args: [first, ...extra.map((e, k) => ref(`x${k}.0`, e.type))], type: STRING, loc };
+    const sep: IrExpr = { kind: "ternary", cond: { kind: "bin", op: ">", left: ref("i.0", F64), right: num(0), type: BOOL, loc }, then: { kind: "strLit", value: ",", type: STRING, loc }, else_: { kind: "strLit", value: "", type: STRING, loc }, type: STRING, loc };
+    L.liftedFns.push({
+      name: helper,
+      params: [{ localId: "a.0", name: "a", type: bytesT }, ...extra.map((e, k): IrParam => ({ localId: `x${k}.0`, name: `x${k}`, type: e.type }))],
+      returnType: STRING,
+      locals: [
+        { id: "a.0", name: "a", type: bytesT, mutable: false },
+        ...extra.map((e, k): IrLocal => ({ id: `x${k}.0`, name: `x${k}`, type: e.type, mutable: false })),
+        { id: "n.0", name: "n", type: F64, mutable: false },
+        { id: "out.0", name: "out", type: STRING, mutable: true },
+        { id: "i.0", name: "i", type: F64, mutable: true },
+      ],
+      body: [
+        { kind: "varDecl", localId: "n.0", init: { kind: "bytesIntrinsic", method: "length", receiver: ref("a.0", bytesT), args: [], type: F64, loc }, loc },
+        { kind: "varDecl", localId: "out.0", init: { kind: "strLit", value: "", type: STRING, loc }, loc },
+        {
+          kind: "for",
+          init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
+          cond: { kind: "bin", op: "<", left: ref("i.0", F64), right: ref("n.0", F64), type: BOOL, loc },
+          update: { kind: "assign", localId: "i.0", value: { kind: "bin", op: "+", left: ref("i.0", F64), right: num(1), type: F64, loc }, loc },
+          body: [{ kind: "assign", localId: "out.0", value: cat(cat(ref("out.0", STRING), sep), piece), loc }],
+          loc,
+        },
+        { kind: "return", value: ref("out.0", STRING), loc },
+      ],
+      loc,
+    });
+  }
+  return { kind: "call", callee: helper, args: [receiver, ...extra], type: STRING, loc };
 }
 
 /** `(a, b) => ...` of the typed-array DEFAULT order over doubles: NaN after every number, -0 before +0, otherwise numeric. */
@@ -9299,7 +9355,7 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
       };
     }
     if (!bytesMemberDeclaredOnBuffer(L, access)) {
-      const looped = lowerBytesLoopCall(L, call, access, receiverIr, loc) ?? lowerBytesIterDrainCall(L, call, access, receiverIr, loc) ?? lowerBytesHofCall(L, call, access, receiverIr, loc);
+      const looped = lowerBytesLoopCall(L, call, access, receiverIr, loc) ?? lowerBytesIterDrainCall(L, call, access, receiverIr, loc) ?? lowerBytesToLocaleStringCall(L, call, access, receiverIr, loc) ?? lowerBytesHofCall(L, call, access, receiverIr, loc);
       if (looped !== null) return looped;
     }
     if (receiverIr.elem !== "buf" && name === "toSorted") {
