@@ -6,7 +6,7 @@ import { programHasPrimSubclass } from "./prim-subclass-gate.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { fillWithKeyList } from "./key-list-fill.js";
-import { canConvertToDyn, isRuntimeRootedClassName, strandTrap } from "../../ir/nodes.js";
+import { canBoxFuncIntoDyn, canConvertToDyn, isRuntimeRootedClassName, strandTrap } from "../../ir/nodes.js";
 import { isProvenBufferRefinement } from "../buffer-refinement.js";
 import { codecGlobalName } from "../codec-shadow.js";
 import { WHATWG_LABEL_TO_ENCODING } from "../text-codec-labels.js";
@@ -7417,6 +7417,39 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     if (fnT.kind !== "func") return null;
     const at = call.arguments[1] ?? call;
     const fence = (why: string): never => L.unsupported("SC1120", at, why);
+    // A replacer the typed drain cannot serve exactly (offset / subject / groups parameters, a group the pattern may not fill, a rest
+    // parameter, a pattern or flags the compiler cannot read, a non-global replaceAll) runs on the dynamic String arm, which implements
+    // Node's whole argument list and its TypeErrors; the replacer boxes into a callable dyn (every parameter checked against its type,
+    // `undefined` for a group that did not participate). Fences only when that box does not exist.
+    //
+    // The dynamic arm hands a parameter whatever Node does, so a parameter typed `string` that Node would give `undefined` (a capture the
+    // pattern may not fill) would throw at the boxed call's type check: that stays the compile-time fence. The serve test needs the
+    // pattern's capture count and participation proof, so a pattern the compiler cannot read serves only a replacer declaring the match.
+    const admitsUndefined = (t: IrType): boolean =>
+      t.kind === "dyn" || (t.kind === "union" && (L.unions.get(t.unionId)?.arms ?? []).some((a) => a.kind === "undefinedT"));
+    const dynServes = (): boolean => {
+      if (fnT.rest === true || fnT.restAbi === "jsval") return false;
+      if (fnT.params.length <= 1) return true;
+      if (lit === null || part === null) return false;
+      const named = lit.pattern.includes("(?<");
+      return fnT.params.every((pt, i) => {
+        if (i === 0) return true;
+        if (i <= part.captureCount) return part.always.get(i) === true || admitsUndefined(pt);
+        if (i === part.captureCount + 1) return pt.kind === "f64" || admitsUndefined(pt);
+        if (i === part.captureCount + 2) return pt.kind === "string" || admitsUndefined(pt);
+        if (i === part.captureCount + 3) return admitsUndefined(pt) || (named && pt.kind === "record");
+        return false;
+      });
+    };
+    const viaDyn = (why: string): IrExpr => {
+      if (!dynServes() || !canBoxFuncIntoDyn(fnT, (id) => L.shapes.get(id), (id) => L.unions.get(id))) return fence(why);
+      const recvD = L.coerceToExpected(receiver, DYN);
+      const reD = L.coerceToExpected(reIr, DYN);
+      const fnD = L.coerceToExpected(fnIr, DYN);
+      if (recvD.type.kind !== "dyn" || reD.type.kind !== "dyn" || fnD.type.kind !== "dyn") return fence(why);
+      const inv: IrExpr = { kind: "dynInvoke", recv: recvD, method, calleeName: `${call.expression.getText()}`, args: [reD, fnD], type: DYN, loc };
+      return { kind: "dynCheck", value: inv, type: STRING, loc };
+    };
     const lit = staticRegexTextOf(L, reNode);
     // The PATTERN is needed for exactly one proof — which capture groups
     // always participate — and a replacer that declares only the whole
@@ -7433,7 +7466,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     // must throw Node's TypeError, which the helper would swallow).
     const flags = flagsOrNull ?? "";
     if (flagsOrNull === null && method === "replaceAll") {
-      fence(
+      return viaDyn(
         "a function replacement value over a regex whose FLAGS the compiler cannot read statically (global-or-once is decided at compile time — write the flags argument as a literal, or bind the regex to a const)",
       );
     }
@@ -7451,12 +7484,12 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     }
     const part = lit !== null ? captureParticipationOfPattern(lit.pattern) : null;
     if (lit !== null && part === null) {
-      fence(
+      return viaDyn(
         "a function replacement value over a pattern this compiler cannot scan for capture-group participation (a '{n,m}' quantifier on a group, or an escaped group name)",
       );
     }
     if (method === "replaceAll" && !flags!.includes("g")) {
-      fence(
+      return viaDyn(
         "'.replaceAll()' with a function replacement value and a non-global regex (Node throws a TypeError here; add the 'g' flag)",
       );
     }
@@ -7473,12 +7506,12 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     }
     const arity = fnT.params.length;
     if (part === null && arity > 1) {
-      fence(
+      return viaDyn(
         `a function replacement value declaring ${arity} parameters over a regex the compiler cannot read statically (a parameter past the first reads a capture group, and the participation proof needs the pattern — write the pattern as a literal, or declare only the match)`,
       );
     }
     if (part !== null && arity > 1 + part.captureCount) {
-      fence(
+      return viaDyn(
         `a function replacement value declaring ${arity} parameters over a pattern with ${part.captureCount} capture group(s) (the trailing offset/subject/groups parameters have no lowering — declare only the match and its groups)`,
       );
     }
@@ -7493,12 +7526,12 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       const adaptable = fnT.params[i]!.kind === "dyn" && i <= groupsMax;
       dynAt.push(adaptable);
       if (fnT.params[i]!.kind !== "string" && !adaptable) {
-        fence(
+        return viaDyn(
           `a function replacement value whose parameter ${i + 1} is '${L.fmt(fnT.params[i]!)}' (the match and its capture groups are strings — annotate them 'string')`,
         );
       }
       if (i >= 1 && part!.always.get(i) !== true) {
-        fence(
+        return viaDyn(
           `a function replacement value reading capture group ${i}, which this pattern does not always fill (Node passes 'undefined' for a group that did not participate, and this compiler will not quietly answer '' for it)`,
         );
       }

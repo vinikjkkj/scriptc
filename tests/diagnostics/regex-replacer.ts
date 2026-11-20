@@ -26,8 +26,10 @@ console.log("a".replace(/(?=(a))a/g, (m: string, g1: string) => g1));
 // A `{n,m}` quantifier on a group is a form this scan declines to parse.
 console.log("aa".replace(/(a){2}/g, (m: string, g1: string) => g1));
 
-// The trailing offset/subject/groups parameters have no lowering.
+// The trailing offset/subject/groups parameters lower (a `number` offset after the groups compiles and answers Node's value; corpus
+// 26165); one the pattern's own shape cannot place keeps the fence.
 console.log("ab".replace(/(a)/g, (m: string, g1: string, off: number) => g1 + off));
+console.log("ab".replace(/(a)/g, (m: string, g1: string, off: string) => g1 + off));
 console.log("ab".replace(/a/g, (m: string, x: string) => m + x));
 
 // The pattern has to be readable at the call for the proof to run.
@@ -48,6 +50,6 @@ console.log("a".replace(new RegExp("(a)", flags), (m: string, g: string) => g));
 console.log("a".replace(new RegExp("(a)", "d"), (m: string, g: string) => g));
 console.log("a".replace(new RegExp("(a)", "v"), (m: string, g: string) => g));
 
-// replaceAll over a non-global regex throws Node's TypeError; the
-// desugar would swallow it, so the fence stays.
+// replaceAll over a non-global regex throws Node's TypeError, which the dynamic String arm raises (so it compiles, and no diagnostic is
+// produced here: a future regression puts one back).
 console.log("a".replaceAll(/(a)/, (m: string, g: string) => g));
