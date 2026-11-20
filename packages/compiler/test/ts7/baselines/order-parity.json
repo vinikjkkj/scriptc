@@ -17468,6 +17468,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26010-sorts-are-stable-and-n-log-n-over-strings-numbers-objects-and-typed-arrays-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26010-sorts-are-stable-and-n-log-n-over-strings-numbers-objects-and-typed-arrays-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2600-dyn-keyed-write-harness.js": {
    "order": [
     "<repo>/tests/corpus/2600-dyn-keyed-write-harness.js"
