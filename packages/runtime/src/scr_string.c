@@ -1567,51 +1567,27 @@ ScrStr *scr_str_empty_obj(void) { return scr_str_empty(); }
 
 /* Same bytes as the empty literal, a different object: see scr_str_absent in
  * the header. Non-static and written through the same SCR_STR_LIT shape. */
-static const SCR_STR_LIT(1) scr_lit_absent = {SCR_STR_IMMORTAL, 0, 0, ""};
+static const SCR_STR_LIT(10) scr_lit_absent = {SCR_STR_IMMORTAL, 9, 9, "undefined"};
 ScrStr *scr_str_absent(void) { return (ScrStr *)&scr_lit_absent; }
 bool scr_str_is_absent(const ScrStr *s) { return s == (const ScrStr *)&scr_lit_absent; }
 /* The same sentinel as data, for scr_arr_try_ref (no call on the hit path). */
 const void *const scr_str_absent_sentinel = &scr_lit_absent;
 
-/* ABSENT-AWARE STRING OPERATIONS (the `_u` entries).
+/* ABSENT-AWARE STRING OPERATIONS.
  *
- * A string slot that holds the absent marker (a regex capture group that did not participate: match/exec/matchAll rows, split captures) is
- * Node's `undefined` wearing a string type, and the plain operations read it as "". A program that CAN hold one (Lowerer.absentStrRisk: a
- * match/exec/matchAll/split whose regex may leave a group unfilled) is emitted against these entries instead, selected by IrModule.absentStrings
- * in both emitters; every other program keeps the plain entries and their exact text. The plain functions above are untouched: the hot
- * concat/equality paths of an ordinary program pay nothing. */
-static const SCR_STR_LIT(10) scr_lit_undefined_text = {SCR_STR_IMMORTAL, 9, 9, "undefined"};
-#define SCR_UNDEF_OF(s) ((s) == (ScrStr *)&scr_lit_absent ? (ScrStr *)&scr_lit_undefined_text : (s))
-
-ScrStr *scr_str_concat_u(ScrStr *a, ScrStr *b) { return scr_str_concat(SCR_UNDEF_OF(a), SCR_UNDEF_OF(b)); }
-ScrStr *scr_str_concat3_u(ScrStr *a, ScrStr *b, ScrStr *c) { return scr_str_concat3(SCR_UNDEF_OF(a), SCR_UNDEF_OF(b), SCR_UNDEF_OF(c)); }
-ScrStr *scr_str_concat4_u(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d) {
-  return scr_str_concat4(SCR_UNDEF_OF(a), SCR_UNDEF_OF(b), SCR_UNDEF_OF(c), SCR_UNDEF_OF(d));
-}
-ScrStr *scr_str_concat5_u(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e) {
-  return scr_str_concat5(SCR_UNDEF_OF(a), SCR_UNDEF_OF(b), SCR_UNDEF_OF(c), SCR_UNDEF_OF(d), SCR_UNDEF_OF(e));
-}
-ScrStr *scr_str_concat6_u(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f) {
-  return scr_str_concat6(SCR_UNDEF_OF(a), SCR_UNDEF_OF(b), SCR_UNDEF_OF(c), SCR_UNDEF_OF(d), SCR_UNDEF_OF(e), SCR_UNDEF_OF(f));
-}
-ScrStr *scr_str_concat7_u(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f, ScrStr *g) {
-  return scr_str_concat7(SCR_UNDEF_OF(a), SCR_UNDEF_OF(b), SCR_UNDEF_OF(c), SCR_UNDEF_OF(d), SCR_UNDEF_OF(e), SCR_UNDEF_OF(f), SCR_UNDEF_OF(g));
-}
-ScrStr *scr_str_concat8_u(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f, ScrStr *g, ScrStr *h) {
-  return scr_str_concat8(SCR_UNDEF_OF(a), SCR_UNDEF_OF(b), SCR_UNDEF_OF(c), SCR_UNDEF_OF(d), SCR_UNDEF_OF(e), SCR_UNDEF_OF(f), SCR_UNDEF_OF(g), SCR_UNDEF_OF(h));
-}
-
-/* The absent marker is the only string that equals nothing but itself among the zero-length ones: against "" (or any other empty instance) the
- * bytes agree and Node's answer is still false. The identity test comes first, so absent === absent holds. */
+ * The absent marker (a regex capture group that did not participate: match/exec/matchAll rows, split captures) is Node's `undefined` held in a
+ * string-typed slot. Its TEXT is "undefined" (length 9), so every operation that stringifies, concatenates, compares or looks up its operand
+ * (`"p" + x`, a template hole, `x === ""`, Number(x), localeCompare, includes/indexOf, a Map key, an object key) already answers as for Node's
+ * undefined with no check on the hot path. What the text cannot say is carried by the entries below, selected per program by
+ * IrModule.absentStrings (Lowerer.absentStrRisk: a match/exec/matchAll/split whose regex may leave a group unfilled): equality against a real
+ * "undefined" string, the relational operators (every one is false against undefined), and the TypeError of a member use. An ordinary
+ * program keeps the plain entries and their exact text. */
 bool scr_str_eq_u(ScrStr *a, ScrStr *b) {
   if (a == b) return true;
-  if (a->len != b->len) return false;
-  if (a->len == 0) return !scr_str_is_absent(a) && !scr_str_is_absent(b);
-  return memcmp(a->data, b->data, a->len) == 0;
+  if (a->len != b->len || memcmp(a->data, b->data, a->len) != 0) return false;
+  /* equal text, different objects: the real string "undefined" is not the marker */
+  return !(scr_str_is_absent(a) || scr_str_is_absent(b));
 }
-
-/* The text a string-typed value reads as when it is ToString'd: the absent marker is undefined, so "undefined". Borrowed in, borrowed out. */
-ScrStr *scr_str_undef_u(ScrStr *s) { return SCR_UNDEF_OF(s); }
 
 /* The relational operators over strings: an operand that is the absent marker is undefined, ToNumber gives NaN, and every comparison is false.
  * op: 0 <, 1 <=, 2 >, 3 >=. */
@@ -1621,16 +1597,12 @@ bool scr_str_rel_u(ScrStr *a, ScrStr *b, int op) {
   return op == 0 ? c < 0 : op == 1 ? c <= 0 : op == 2 ? c > 0 : c >= 0;
 }
 
-/* A member read or call on the absent marker: Node's TypeError, naming the property, as a pending exception (the emitter's pending check follows
- * the call, like every fallible runtime call). True when the receiver is a real string. */
-bool scr_str_recv_chk_u(ScrStr *s, const char *member) {
-  if (s == (ScrStr *)&scr_lit_absent) {
-    char msg[96];
-    int n = snprintf(msg, sizeof msg, "Cannot read properties of undefined (reading '%s')", member);
-    scr_throw_error_named(scr_str_new("TypeError", 9), scr_str_new(msg, (size_t)n));
-    return false;
-  }
-  return true;
+/* A member read or call on the absent marker: Node's TypeError naming the property, as a pending exception (the emitter's pending check follows
+ * the call). The emitted test is the inline pointer compare against scr_str_absent_sentinel. */
+void scr_str_absent_member(const char *member) {
+  char msg[96];
+  int n = snprintf(msg, sizeof msg, "Cannot read properties of undefined (reading '%s')", member);
+  scr_throw_error_named(scr_str_new("TypeError", 9), scr_str_new(msg, (size_t)n));
 }
 
 ScrStr *(*scr_dyn_str_case_hook)(const ScrStr *s, int to_lower) = NULL;

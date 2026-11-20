@@ -26098,7 +26098,12 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
         for (const idx of idxs.slice(1)) {
           body.push({
             kind: "if",
-            cond: { kind: "strEq", negated: false, left: gRef, right: { kind: "strLit", value: "", type: STRING, loc }, type: BOOL, loc },
+            // the slot is unfilled when it is the empty string or the absent marker (whose text is "undefined")
+            cond: {
+              kind: "logical", op: "||", type: BOOL, loc,
+              left: { kind: "strEq", negated: false, left: gRef, right: { kind: "strLit", value: "", type: STRING, loc }, type: BOOL, loc },
+              right: { kind: "libCall", fn: "str.isAbsent", args: [gRef], type: BOOL, loc },
+            },
             then: [{ kind: "assign", localId: id, value: elem(idx), loc }],
             else_: null,
             loc,

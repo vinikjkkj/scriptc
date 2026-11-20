@@ -991,7 +991,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           while (i < names.length) {
             const take = Math.min(7, names.length - i);
             const group = [acc, ...names.slice(i, i + take)];
-            res = E.newTemp(e.type, `${concatFn(group.length, E.mod.absentStrings === true)}(${group.join(", ")})`);
+            res = E.newTemp(e.type, `${concatFn(group.length)}(${group.join(", ")})`);
             acc = res.name;
             i += take;
           }
@@ -999,7 +999,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         }
         const l = E.emitExpr(e.left);
         const r = E.emitExpr(e.right);
-        return E.newTemp(e.type, `${E.mod.absentStrings === true ? "scr_str_concat_u" : "scr_str_concat"}(${l.name}, ${r.name})`);
+        return E.newTemp(e.type, `scr_str_concat(${l.name}, ${r.name})`);
       }
       case "strEq": {
         const l = emitBorrowedLocal(E, e.left, [e.right]);
@@ -1009,8 +1009,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       case "strCmp": {
         const l = emitBorrowedLocal(E, e.left, [e.right]);
         const r = emitBorrowedLocal(E, e.right, []);
-        if (E.mod.absentStrings === true) return E.newTemp(e.type, `scr_str_rel_u(${l.name}, ${r.name}, ${["<", "<=", ">", ">="].indexOf(e.op)})`);
         const fn = e.utf16 === true ? "scr_str_cmp_u16" : "scr_str_cmp";
+        // A module that can hold the absent string: every relational operator against it is false (undefined -> NaN); the test is two pointer compares.
+        if (E.mod.absentStrings === true) {
+          return E.newTemp(e.type, `(${l.name} != (ScrStr *)scr_str_absent_sentinel && ${r.name} != (ScrStr *)scr_str_absent_sentinel && ${fn}(${l.name}, ${r.name}) ${e.op} 0)`);
+        }
         return E.newTemp(e.type, `${fn}(${l.name}, ${r.name}) ${e.op} 0`);
       }
       case "toString": {
@@ -1102,7 +1105,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const r = emitBorrowedLocal(E, e.receiver, e.args);
         // A module that can hold the absent string: a member use of it is Node's TypeError, before the arguments evaluate (pending check follows).
         const absentMember = E.mod.absentStrings === true ? absentRecvMember(e.method) : undefined;
-        if (absentMember !== undefined) E.fallibleTemp(BOOL, `scr_str_recv_chk_u(${r.name}, ${JSON.stringify(absentMember)})`);
+        if (absentMember !== undefined) emitAbsentMemberCheckC(E, r.name, absentMember);
         const args = e.args.map((a, i) => emitBorrowedLocal(E, a, e.args.slice(i + 1)));
         const method = e.method;
         switch (method) {
@@ -1242,17 +1245,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // Receiver and args are borrowed frame temps; string/array results
         // come back +1 and join the frame via newTemp. replaceAll and split
         // may THROW (catchable) — fallibleTemp emits the pending check.
-        let r = E.emitExpr(e.receiver);
-        // A module that can hold the absent string: a member use of it is Node's TypeError, before the arguments evaluate; the subject of
-        // exec/test is ToString'd, so it reads as the text "undefined".
+        const r = E.emitExpr(e.receiver);
+        // A module that can hold the absent string: a member use of it is Node's TypeError, before the arguments evaluate.
         const absentAware = E.mod.absentStrings === true;
         if (absentAware && e.receiver.type.kind === "string") {
           const am = absentRegexRecvMember(e.method);
-          if (am !== undefined) E.fallibleTemp(BOOL, `scr_str_recv_chk_u(${r.name}, ${JSON.stringify(am)})`);
-          else if (e.method === "exec") r = { ...r, name: `scr_str_undef_u(${r.name})` };
+          if (am !== undefined) emitAbsentMemberCheckC(E, r.name, am);
         }
         const args = e.args.map((a) => E.emitExpr(a));
-        if (absentAware && e.method === "test" && e.args[0]?.type.kind === "string") args[0] = { ...args[0]!, name: `scr_str_undef_u(${args[0]!.name})` };
         const method = e.method;
         switch (method) {
           case "test":
@@ -10466,6 +10466,17 @@ export function flattenStrConcat(e: Extract<IrExpr, { kind: "strConcat" }>): IrE
 }
 
 /** The runtime entry for a group of `n` operands: the binary scr_str_concat for two, scr_str_concat3..8 above. */
-export function concatFn(n: number, absent = false): string {
-  return (n === 2 ? "scr_str_concat" : `scr_str_concat${n}`) + (absent ? "_u" : "");
+export function concatFn(n: number): string {
+  return n === 2 ? "scr_str_concat" : `scr_str_concat${n}`;
+}
+
+/** A member use of a string receiver in a module that can hold the absent string: Node's TypeError, before the arguments evaluate. The test is one
+ * inline pointer compare (cold branch); the pending exception unwinds exactly like a fallible runtime call's. */
+function emitAbsentMemberCheckC(E: CEmitter, recv: string, member: string): void {
+  E.line(`if (__builtin_expect(${recv} == (ScrStr *)scr_str_absent_sentinel, 0)) {`);
+  E.indent++;
+  E.line(`scr_str_absent_member(${JSON.stringify(member)});`);
+  E.emitPendingCheck();
+  E.indent--;
+  E.line(`}`);
 }
