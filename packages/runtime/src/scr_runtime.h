@@ -3489,6 +3489,8 @@ typedef struct ScrCaught {
   void (*release_fn)(void *);
   ScrTraceFn trace_fn;
 } ScrCaught;
+/* String(e) of a thrown REF payload the dyn unit can render (null/undefined); NULL until the dyn unit throws one. */
+extern ScrStr *(*scr_caught_ref_str_hook)(const ScrCaught *c);
 
 /* Throw-site registration of the typed-payload to dyn converter (keyed by the payload's retain adapter), and the lookup; see scr_exception.c. */
 void scr_exc_todyn_register(void *(*retain)(void *), void *fn);

@@ -153,6 +153,8 @@ bool scr_caught_instanceof(const ScrCaught *c, size_t pre, size_t post) {
   return pre <= vt->pre && vt->pre <= post;
 }
 
+ScrStr *(*scr_caught_ref_str_hook)(const ScrCaught *c) = NULL;
+
 ScrStr *scr_caught_to_string(const ScrCaught *c) {
   switch (c->kind) {
   case SCR_EXC_F64: return scr_f64_to_scrstr(c->f64);
@@ -168,6 +170,11 @@ ScrStr *scr_caught_to_string(const ScrCaught *c) {
     }
     /* fall through */
   case SCR_EXC_REF:
+    /* A thrown dyn null/undefined (the dyn unit installs the hook when it throws one). */
+    if (scr_caught_ref_str_hook != NULL) {
+      ScrStr *h = scr_caught_ref_str_hook(c);
+      if (h != NULL) return h;
+    }
     /* Object.prototype.toString — exact for thrown records and class
      * instances without a toString override; thrown arrays/closures/union
      * boxes print this too where Node would vary (SEMANTICS.md). */
