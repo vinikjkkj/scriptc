@@ -90,8 +90,17 @@ size_t scr_bytes_elem_size(ScrBytesElem elem) {
 
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
 
+/* A small owner's storage rides in the SAME allocation as its header: `data` points just past the struct, and release frees one block instead of two.
+ * sizeof(ScrBytes) is a multiple of 8, so every element size (at most 8) stays aligned. A view never owns storage (backing is set), so the one test in
+ * scr_bytes_release is whether `data` still names the inline tail. Larger owners keep a separate calloc'd block. */
+#define SCR_BYTES_INLINE_MAX 512u
+
 static ScrBytes *scr_bytes_alloc(ScrBytesElem elem, size_t len) {
-  ScrBytes *b = calloc(1, sizeof(ScrBytes)) /* own = NULL */;
+  size_t esz = scr_bytes_elem_size(elem);
+  /* len is bounded before the multiply, so len * esz (esz <= 8) cannot overflow */
+  bool inl = len <= SCR_BYTES_INLINE_MAX && len * esz <= SCR_BYTES_INLINE_MAX;
+  size_t nbytes = inl ? len * esz : 0;
+  ScrBytes *b = calloc(1, sizeof(ScrBytes) + (inl ? (nbytes ? nbytes : 1) : 0)) /* own = NULL */;
   if (!b) scr_bytes_oom();
   b->rc = 1;
   b->len = len;
@@ -100,8 +109,12 @@ static ScrBytes *scr_bytes_alloc(ScrBytesElem elem, size_t len) {
    * starts UNCLASSIFIED and the producer must say; every other elem
    * names exactly one constructor. See the header. */
   b->flavor = (elem == SCR_BYTES_U8) ? SCR_BF_UNKNOWN : SCR_BF_PLAIN;
-  b->data = calloc(len ? len : 1, scr_bytes_elem_size(elem));
-  if (!b->data) scr_bytes_oom();
+  if (inl) {
+    b->data = (uint8_t *)(b + 1);
+  } else {
+    b->data = calloc(len ? len : 1, esz);
+    if (!b->data) scr_bytes_oom();
+  }
   b->backing = NULL;
   b->weakkey = 0;
   b->abuf = NULL;
@@ -244,7 +257,11 @@ void scr_bytes_release(ScrBytes *b) {
        * weak cache slot as it dies (see ScrBytes.abuf). */
       if (b->elem == SCR_BYTES_BUF && b->backing->abuf == b) b->backing->abuf = NULL;
       scr_bytes_release(b->backing); /* a view: data points into the owner */
-    } else {
+    } else if (b->data != (uint8_t *)(b + 1)
+#ifdef SCR_OBJ_PLANT_BUG
+               || SCR_OBJ_PLANT_BUG == 21 /* the planted defect: an inline tail is handed to free() */
+#endif
+    ) {
       free(b->data);
     }
     if (b->own != NULL) scr_bytes_own_ops->free(b);
