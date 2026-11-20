@@ -33,10 +33,28 @@ static void scr_big_oom(void) {
 
 /* ── allocation ───────────────────────────────────────────────────────── */
 
+/* SMALL bigints (up to SCR_BIG_SMALL_LIMBS limbs: everything a 64-bit integer, a range check or a shift of one produces) are
+ * the bulk of the churn, and each one used to be a malloc/free pair. They now come from a LIFO free list of fixed-size blocks.
+ * Bigints are main-thread values (the reference counts are not atomic), so the list needs no lock. */
+#define SCR_BIG_SMALL_LIMBS 4
+#define SCR_BIG_FREE_MAX 64
+static ScrBigInt *scr_big_free_small[SCR_BIG_FREE_MAX];
+static size_t scr_big_free_small_n;
+
 static ScrBigInt *scr_big_alloc(size_t cap) {
   if (cap == 0) cap = 1;
   if (cap > (SIZE_MAX - sizeof(ScrBigInt)) / sizeof(uint32_t)) scr_big_oom();
-  ScrBigInt *b = malloc(sizeof(ScrBigInt) + cap * sizeof(uint32_t));
+  ScrBigInt *b;
+  if (cap <= SCR_BIG_SMALL_LIMBS) {
+    cap = SCR_BIG_SMALL_LIMBS;
+    if (scr_big_free_small_n > 0) {
+      b = scr_big_free_small[--scr_big_free_small_n];
+    } else {
+      b = malloc(sizeof(ScrBigInt) + cap * sizeof(uint32_t));
+    }
+  } else {
+    b = malloc(sizeof(ScrBigInt) + cap * sizeof(uint32_t));
+  }
   if (!b) scr_big_oom();
   scr_bigint_alloc_note();
   b->rc = 1;
@@ -63,7 +81,8 @@ void scr_big_release(ScrBigInt *b) {
   if (!b || b->rc == SIZE_MAX) return;
   if (--b->rc == 0) {
     scr_bigint_free_note();
-    free(b);
+    if (b->cap == SCR_BIG_SMALL_LIMBS && scr_big_free_small_n < SCR_BIG_FREE_MAX) scr_big_free_small[scr_big_free_small_n++] = b;
+    else free(b);
   }
 }
 
