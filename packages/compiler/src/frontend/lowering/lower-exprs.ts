@@ -18372,9 +18372,7 @@ export function castDynBinding(L: Lowerer, decl: ts.VariableDeclaration): boolea
       const written = recv && ((ts.isBinaryExpression(par.parent) && par.parent.left === par && par.parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && par.parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
         ((ts.isPrefixUnaryExpression(par.parent) || ts.isPostfixUnaryExpression(par.parent)) && (par.parent.operator === ts.SyntaxKind.PlusPlusToken || par.parent.operator === ts.SyntaxKind.MinusMinusToken)) ||
         ts.isDeleteExpression(par.parent));
-      // A method call keeps the checked cast: the call lowering reads the receiver through the class type.
-      const called = recv && ts.isCallExpression(par.parent) && par.parent.expression === par;
-      if (!recv || written || called) ok = false;
+      if (!recv || written) ok = false;
       return;
     }
     ts.forEachChild(n, (c) => { visit(c); return undefined; });

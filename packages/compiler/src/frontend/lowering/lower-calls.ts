@@ -42,6 +42,7 @@ import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCal
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerDnsResolverMethodCall } from "./lower-dgram.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
+import { catchCastDynRecv } from "./lower-exprs.js";
 import { dynSymbolKeyOf, classSymbolBag, lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
@@ -4818,6 +4819,17 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     refuseCodecCoercionCall(L, expr);
     refuseUnmodelledCopyLoopCall(L, expr);
     const loc = locOf(expr);
+    // `x.m(...)` where x is a const holding a catch payload's dyn value (castDynBinding): a dynamic invoke, so a payload that is no
+    // instance of the cast class answers Node's `x.m is not a function` instead of a checked-cast TypeError.
+    if (ts.isPropertyAccessExpression(expr.expression) && !expr.expression.questionDotToken && ts.isIdentifier(expr.expression.expression) &&
+        !expr.arguments.some((a) => ts.isSpreadElement(a)) && catchCastDynRecv(L, expr.expression.expression)) {
+      const castId = L.resolveLocal(expr.expression.expression);
+      if (castId !== null) {
+        const crecv: IrExpr = { kind: "varRef", localId: castId.id, type: DYN, loc: locOf(expr.expression.expression) };
+        const cargs = expr.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+        return L.maybeNarrow({ kind: "dynInvoke", recv: crecv, method: expr.expression.name.text, calleeName: v8CallSite(expr.expression), args: cargs, type: DYN, loc }, expr);
+      }
+    }
     {
       const viaForward = lowerForwardedRequireMemberCall(L, expr);
       if (viaForward !== null) return viaForward;
