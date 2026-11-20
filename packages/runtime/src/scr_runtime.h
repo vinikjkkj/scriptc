@@ -1446,6 +1446,8 @@ extern ScrStr *(*scr_dyn_str_case_hook)(const ScrStr *s, int to_lower);
  * (exception cell) and answers NULL.
  * Borrow s and form; +1. */
 ScrStr *scr_str_normalize(const ScrStr *s, const ScrStr *form);
+/* toLocaleLowerCase(tag) / toLocaleUpperCase(tag) for one tag: +1, or NULL with the RangeError pending. */
+ScrStr *scr_str_to_locale_case(const ScrStr *s, const ScrStr *tag, int to_lower);
 
 /* charAt(i): 1-code-unit string; out of range → empty string. Half of an
  * astral pair → U+FFFD (divergence, see above). Returns +1. */

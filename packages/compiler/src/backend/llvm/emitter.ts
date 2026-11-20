@@ -15697,6 +15697,15 @@ class LlEmitter {
         return call("scr_str_to_lower", "ptr (ptr)", `ptr ${r.name}`, "ptr", true);
       case "toUpperCase":
         return call("scr_str_to_upper", "ptr (ptr)", `ptr ${r.name}`, "ptr", true);
+      case "toLocaleLowerCase":
+      case "toLocaleUpperCase": {
+        this.declare(`declare ptr @scr_str_to_locale_case(ptr, ptr, i32)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_str_to_locale_case(ptr ${r.name}, ptr ${args[0]!.name}, i32 ${e.method === "toLocaleLowerCase" ? 1 : 0})`);
+        const out = this.own({ name: t, type: e.type });
+        this.emitPendingCheck();
+        return out;
+      }
       case "normalize": {
         // Catchable RangeError for an invalid form: the pending check
         // follows the call, as the C emitter's fallibleTemp does.

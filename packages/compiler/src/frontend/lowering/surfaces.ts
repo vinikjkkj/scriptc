@@ -429,6 +429,10 @@ export const STR_METHODS: Record<
   // completes an omitted form to "NFC", Node's default). The lre-backed
   // tables in scr_regex.c, like the case pair above.
   normalize: { method: "normalize", result: STRING, minArgs: 0, maxArgs: 1 },
+  // toLocaleLowerCase / toLocaleUpperCase(locales?): ICU's language rules for tr, az, lt and el, the root for every other tag
+  // (scr_regex.c); the no-argument form is toLowerCase/toUpperCase (lowerStringMethodCall).
+  toLocaleLowerCase: { method: "toLocaleLowerCase", result: STRING, minArgs: 0, maxArgs: 1 },
+  toLocaleUpperCase: { method: "toLocaleUpperCase", result: STRING, minArgs: 0, maxArgs: 1 },
 };
 
 /** One member of the island-backed ambient surface: declared argument

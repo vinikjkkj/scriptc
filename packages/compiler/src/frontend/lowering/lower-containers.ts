@@ -7986,6 +7986,23 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     if (entry.method === "normalize" && args.length === 0) {
       args.push({ kind: "strLit", value: "NFC", type: STRING, loc: locOf(call) });
     }
+    // toLocaleLowerCase / toLocaleUpperCase: no locales (or a literal undefined) is the root conversion; a string tag is the
+    // intrinsic; a `string[]` or `string | undefined` locales value takes the dynamic String arm, which implements ToCanonicalizedLocaleList
+    // over a list and an undefined entry exactly (first element, empty list = default, RangeError for a bad tag).
+    if (entry.method === "toLocaleLowerCase" || entry.method === "toLocaleUpperCase") {
+      const lower = entry.method === "toLocaleLowerCase";
+      const l = locOf(call);
+      if (args.length === 0 || args[0]!.kind === "unitLit") {
+        return { kind: "strIntrinsic", method: lower ? "toLowerCase" : "toUpperCase", receiver, args: [], type: STRING, loc: l };
+      }
+      if (args[0]!.type.kind !== "string") {
+        const recvD = L.coerceToExpected(receiver, DYN);
+        const argD = L.coerceToExpected(args[0]!, DYN);
+        if (recvD.type.kind !== "dyn" || argD.type.kind !== "dyn") L.badType(call.arguments[0]!, L.typeOf(call.arguments[0]!));
+        const inv: IrExpr = { kind: "dynInvoke", recv: recvD, method: entry.method, calleeName: `${access.expression.getText()}.${entry.method}`, args: [argD], type: DYN, loc: l };
+        return { kind: "dynCheck", value: inv, type: STRING, loc: l };
+      }
+    }
     const split: IrExpr = {
       kind: "strIntrinsic",
       method: entry.method,

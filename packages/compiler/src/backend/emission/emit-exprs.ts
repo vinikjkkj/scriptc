@@ -1181,6 +1181,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return E.newTemp(e.type, `scr_str_to_well_formed(${r.name})`);
           case "localeCompare":
             return E.newTemp(e.type, `scr_str_locale_compare(${r.name}, ${args[0]!.name})`);
+          case "toLocaleLowerCase":
+          case "toLocaleUpperCase":
+            // An invalid language tag throws Node's catchable RangeError (pending check after the call, NULL result).
+            return E.fallibleTemp(e.type, `scr_str_to_locale_case(${r.name}, ${args[0]!.name}, ${method === "toLocaleLowerCase" ? 1 : 0})`);
           case "normalize":
             // Throws a catchable RangeError for an invalid form: the pending
             // check follows the call (the result is NULL on that path).

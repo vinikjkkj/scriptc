@@ -390,7 +390,7 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
         case "strIntrinsic":
           // normalize(form) throws Node's catchable RangeError for a form
           // other than NFC/NFD/NFKC/NFKD (scr_str_normalize, exception cell).
-          if (rec["method"] === "normalize") f.throws = true;
+          if (rec["method"] === "normalize" || rec["method"] === "toLocaleLowerCase" || rec["method"] === "toLocaleUpperCase") f.throws = true;
           break;
         case "arraySet":
         case "arrayClear":
