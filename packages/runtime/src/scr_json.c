@@ -1349,6 +1349,37 @@ static inline void scr_dyn_obj_idx_drop(ScrDyn *obj) {
   }
 }
 
+/* The SMALL-TABLE position hint: a table of SCR_OBJ_HINT_MIN to SCR_OBJ_IDX_MIN-1 members is read by a linear walk whose cost grows with the position of the
+ * key; measured on the messaging benches, 87% of those hits sit where the same key (the same literal's address) was found last time (mysql 62M of 71M
+ * hits over all small tables). A one-byte hint per key address is checked first: the entry it names answers only if its key compares equal, and then it is the
+ * entry the walk would have found because a table's keys are unique; anything else (stale, colliding, out of range, never set) walks as before and
+ * re-points the hint. From 1 to SCR_OBJ_HINT_MIN-1 members the walk is shorter than the check, so those tables never come here. Main thread only. */
+#define SCR_OBJ_HINT_MIN 5
+static uint8_t scr_obj_shint[1u << SCR_OBJ_HINT_BITS];
+static __attribute__((noinline)) ScrDyn *scr_dyn_obj_get_ge5(const ScrDyn *d, const char *key, size_t key_len) {
+  const uint32_t len = d->v.obj.len;
+  if (__builtin_expect(len >= SCR_OBJ_IDX_MIN, 0)) return scr_dyn_obj_get_big(d, key, key_len);
+  const ScrDynEntry *ents = d->v.obj.entries;
+  uint8_t *hs = &scr_obj_shint[(size_t)(((uint64_t)(uintptr_t)key * 0x9E3779B97F4A7C15ull) >> (64 - SCR_OBJ_HINT_BITS))];
+  const uint32_t p = *hs;
+  const ScrDynEntry *e;
+#ifdef SCR_OBJ_PLANT_BUG
+  if (SCR_OBJ_PLANT_BUG == 11 && p < len) e = &ents[p]; /* the planted defect: the small-table hint answers without a key compare */
+  else
+#endif
+  if (p < len && SCR_DYN_KEY_EQ(&ents[p], key, key_len)) {
+    e = &ents[p];
+  } else {
+    uint32_t i = 0;
+    for (; i < len; i++) if (SCR_DYN_KEY_EQ(&ents[i], key, key_len)) break;
+    if (i == len) return NULL;
+    *hs = (uint8_t)i;
+    e = &ents[i];
+  }
+  ScrDyn *v = e->value;
+  return __builtin_expect(v == scr_dyn_acc_slot(), 0) ? NULL : v;
+}
+
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
   /* A COUNT-DOWN WALK THAT KEEPS ITS COUNTER. With 24-byte entries clang rewrites a counted loop into "advance until the end pointer", whose setup
    * is len * 24 (an lea and a shift) on every call where the 32-byte entry was one shift; this is the hottest loop over dyn objects, so that one
@@ -1356,7 +1387,7 @@ ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
    * test stays dec/jnz and no end pointer is formed. It emits no instruction of its own. */
   const ScrDynEntry *e = d->v.obj.entries;
 #ifndef SCR_OBJ_NOIDX
-  if (__builtin_expect(d->v.obj.len >= SCR_OBJ_IDX_MIN, 0)) return scr_dyn_obj_get_big(d, key, key_len); /* a tail call: the small walk is untouched */
+  if (__builtin_expect(d->v.obj.len >= SCR_OBJ_HINT_MIN, 0)) return scr_dyn_obj_get_ge5(d, key, key_len); /* a tail call: the walk below is untouched for 1-4 members */
 #endif
   for (size_t n = d->v.obj.len; n != 0; n--, e++) {
     __asm__("" : "+r"(n));
