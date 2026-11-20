@@ -6740,6 +6740,8 @@ export type IrLibFn =
   | "insp.dyn"
   | "insp.dynS"
   | "insp.dynH"
+  | "insp.table"
+  | "insp.tableP"
   | "insp.fmtS"
   | "big.str"
   | "key.fromPkcs8"
@@ -15753,6 +15755,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "insp.dynS",
   // util.format %o over a function value: showHidden on the function box.
   "insp.dynH",
+  "insp.table",
+  "insp.tableP",
   "insp.dynSpread",
   // util.format over a RUNTIME argument list: a %o over a dyn array/function and a
   // user toString under %s/%d/%i/%f leave a pending exception.

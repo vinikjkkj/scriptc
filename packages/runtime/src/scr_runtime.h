@@ -11246,6 +11246,9 @@ ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth);
 ScrDyn *scr_dyn_fn_code_set(ScrDyn *d, unsigned code);
 /* util.format %o: scr_insp_dyn_s with showHidden on function values. */
 ScrStr *scr_insp_dyn_h(ScrDyn *d, double depth);
+/* console.table over a boxed array/object and the optional boxed column array (undefined when absent): the table text, +1. */
+ScrStr *scr_insp_table(ScrDyn *data, ScrDyn *props);
+ScrStr *scr_insp_table1(ScrDyn *data);
 /* format's %s conversion, which is NOT the one above: an object carrying
  * its OWN toString is String()-converted rather than inspected (Node's
  * hasBuiltInToString test). MAY THROW — the toString is user code. */

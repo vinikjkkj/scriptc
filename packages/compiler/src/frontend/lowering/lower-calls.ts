@@ -5210,6 +5210,33 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       return L.lowerSuperMethodCall(expr, expr.expression);
     }
 
+    // console.table(data[, columns]): Node's table over the boxed array or object (arrays and plain objects of rows; the text is built by the
+    // runtime from the dyn walk) printed as one console.log line. A non-object argument is console.log's own business and has no table.
+    if (
+      ts.isPropertyAccessExpression(expr.expression) &&
+      expr.expression.name.text === "table" &&
+      !L.chainBlocked(expr.expression, expr) &&
+      L.isStdlibGlobal(expr.expression.expression, "console")
+    ) {
+      if (expr.arguments.length < 1 || expr.arguments.length > 2 || expr.arguments.some((a) => ts.isSpreadElement(a))) {
+        L.unsupported("SC1090", expr, "console.table with no argument, more than two, or a spread (call console.table(data) or console.table(data, columns))");
+      }
+      const dataIr = L.lowerExpr(expr.arguments[0]!);
+      const dk = dataIr.type.kind;
+      if ((dk === "string" || dk === "f64" || dk === "bool") && expr.arguments.length === 1) {
+        return { kind: "intrinsic", name: "console.log", args: [dataIr], type: VOID, loc };
+      }
+      if (dk !== "array" && dk !== "record" && dk !== "dyn") {
+        L.unsupported("SC1090", expr, `console.table of '${L.fmt(dataIr.type)}' (an array or an object prints a table; a scalar prints like console.log)`);
+      }
+      const box = (e: IrExpr): IrExpr => (e.type.kind === "dyn" ? e : { kind: "dynFrom", value: e, type: DYN, loc });
+      const text: IrExpr =
+        expr.arguments.length === 1
+          ? { kind: "libCall", fn: "insp.table", args: [box(dataIr)], type: STRING, loc }
+          : { kind: "libCall", fn: "insp.tableP", args: [box(dataIr), box(L.lowerExpr(expr.arguments[1]!))], type: STRING, loc };
+      return { kind: "intrinsic", name: "console.log", args: [text], type: VOID, loc };
+    }
+
     const consoleMember = L.consoleCallMember(expr);
     if (consoleMember !== null) {
       // console.log/info/debug write stdout; console.error and console.warn

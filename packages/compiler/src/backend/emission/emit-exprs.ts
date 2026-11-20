@@ -9098,6 +9098,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "insp.dynH":
             return finish(`scr_insp_dyn_h(${arg(0)}, ${arg(1)})`);
+          case "insp.table":
+            return finish(`scr_insp_table1(${arg(0)})`);
+          case "insp.tableP":
+            return finish(`scr_insp_table(${arg(0)}, ${arg(1)})`);
           case "insp.dynS":
             return finish(`scr_insp_dyn_s(${arg(0)}, ${arg(1)})`);
           case "insp.fmtS":

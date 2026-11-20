@@ -1610,6 +1610,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.dyn": { argTypes: [DYN, F64, F64], result: STRING },
   "insp.dynS": { argTypes: [DYN, F64], result: STRING },
   "insp.dynH": { argTypes: [DYN, F64], result: STRING },
+  "insp.table": { argTypes: [DYN], result: STRING },
+  "insp.tableP": { argTypes: [DYN, DYN], result: STRING },
   "insp.fmtS": { argTypes: [DYN, F64], result: STRING },
   "big.str": { argTypes: [BIGINT_T, F64], result: STRING },
   "rsa.publicEncrypt": { argTypes: [DYN, DYN, F64, F64], result: BYTES_U8_T },

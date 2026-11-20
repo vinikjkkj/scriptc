@@ -1180,6 +1180,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "insp.dyn": "scr_insp_dyn",
   "insp.dynS": "scr_insp_dyn_s",
   "insp.dynH": "scr_insp_dyn_h",
+  "insp.table": "scr_insp_table1",
+  "insp.tableP": "scr_insp_table",
   "insp.fmtS": "scr_insp_fmt_s",
   "big.str": "scr_big_to_str",
   "big.fromDyn": "scr_big_from_dyn",

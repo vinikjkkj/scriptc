@@ -32,6 +32,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "scr_width.h"
+
 static void insp_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
@@ -5096,3 +5098,206 @@ ScrError *scr_insp_unhandled_nonerr(const ScrDyn *payload) {
   return u;
 }
 
+
+/* ── console.table (Node's lib/internal/console/constructor.js table + internal/cli_table) ───────────────────────────────────────────────
+ * Arrays and plain objects of rows (objects, arrays or primitives), with the optional column filter; a cell is util.inspect of the value at
+ * depth 0 (-1 for an object of more than two keys), maxArrayLength 3 and an unbounded line. Width is Node's ICU string width. */
+typedef struct { char *p; size_t len, cap; } TblBuf;
+static void tb_put(TblBuf *b, const char *s, size_t n) {
+  if (b->len + n + 1 > b->cap) {
+    b->cap = (b->len + n + 1) * 2;
+    b->p = realloc(b->p, b->cap);
+    if (!b->p) abort();
+  }
+  memcpy(b->p + b->len, s, n);
+  b->len += n;
+}
+static void tb_lit(TblBuf *b, const char *s) { tb_put(b, s, strlen(s)); }
+
+static int tbl_cp_width(unsigned cp) {
+  size_t lo = 0, hi = sizeof scr_width_runs / sizeof scr_width_runs[0];
+  while (lo < hi) {
+    size_t mid = (lo + hi) / 2;
+    if (cp < scr_width_runs[mid][0]) hi = mid;
+    else if (cp > scr_width_runs[mid][1]) lo = mid + 1;
+    else return (int)scr_width_runs[mid][2];
+  }
+  return 1;
+}
+
+/* NFC lives in the regex unit (scr_regex.c); a program that never links it measures non-ASCII text without composition (OPEN: only
+ * decomposed input such as "e" + U+0301 differs from Node there). */
+extern ScrStr *scr_str_normalize(const ScrStr *s, const ScrStr *form) __attribute__((weak));
+
+/* getStringWidth: ANSI escapes stripped, the ASCII prefix counted by hand, the rest NFC-normalized and summed per code point. */
+static size_t tbl_width(const ScrStr *s) {
+  /* strip CSI ... letter sequences (ESC [ params final) the way stripVTControlCharacters does for the common SGR form */
+  size_t w = 0;
+  const unsigned char *p = (const unsigned char *)s->data;
+  size_t n = s->len, i = 0;
+  bool ascii = true;
+  for (size_t k = 0; k < n; k++) if (p[k] >= 127) { ascii = false; break; }
+  ScrStr *norm = NULL;
+  if (!ascii && scr_str_normalize != NULL) {
+    ScrStr *form = scr_str_new("NFC", 3);
+    norm = scr_str_normalize(s, form);
+    scr_str_release(form);
+    p = (const unsigned char *)norm->data;
+    n = norm->len;
+  }
+  while (i < n) {
+    if (p[i] == 0x1b && i + 1 < n && p[i + 1] == '[') {
+      size_t j = i + 2;
+      while (j < n && ((p[j] >= '0' && p[j] <= '9') || p[j] == ';')) j++;
+      if (j < n && p[j] >= '@' && p[j] <= '~') { i = j + 1; continue; }
+    }
+    unsigned cp = p[i];
+    size_t k = 1;
+    if (cp >= 0xf0 && i + 3 < n) { cp = ((cp & 7u) << 18) | ((p[i + 1] & 63u) << 12) | ((p[i + 2] & 63u) << 6) | (p[i + 3] & 63u); k = 4; }
+    else if (cp >= 0xe0 && i + 2 < n) { cp = ((cp & 15u) << 12) | ((p[i + 1] & 63u) << 6) | (p[i + 2] & 63u); k = 3; }
+    else if (cp >= 0xc0 && i + 1 < n) { cp = ((cp & 31u) << 6) | (p[i + 1] & 63u); k = 2; }
+    w += (size_t)tbl_cp_width(cp);
+    i += k;
+  }
+  if (norm) scr_str_release(norm);
+  return w;
+}
+
+/* one cell: inspect at the table's options */
+static ScrStr *tbl_cell(ScrDyn *v) {
+  double depth = 0;
+  if (v->kind == SCR_DYN_OBJ) {
+    size_t n = 0;
+    for (size_t i = 0; i < v->v.obj.len; i++) if (v->v.obj.entries[i].value != scr_dyn_acc_slot()) n++;
+    if (n > 2) depth = -1;
+  }
+  ScrDyn *o = scr_dyn_new_obj();
+  scr_dyn_obj_set(o, "depth", 5, scr_dyn_new_num(depth));
+  scr_dyn_obj_set(o, "maxArrayLength", 14, scr_dyn_new_num(3));
+  scr_dyn_obj_set(o, "breakLength", 11, scr_dyn_new_num(INFINITY));
+  scr_insp_opts_push(o);
+  ScrStr *r = scr_insp_dyn(v, 0, depth);
+  scr_insp_opts_pop();
+  scr_dyn_release(o);
+  return r;
+}
+
+typedef struct { ScrStr *key; ScrDyn *val; } TblEnt; /* an own enumerable entry of a row */
+static size_t tbl_entries(ScrDyn *d, TblEnt **out) {
+  size_t cap = d->kind == SCR_DYN_ARR ? d->v.arr.len : d->v.obj.len, n = 0;
+  TblEnt *e = malloc((cap ? cap : 1) * sizeof *e);
+  if (!e) abort();
+  if (d->kind == SCR_DYN_ARR) {
+    for (size_t i = 0; i < d->v.arr.len; i++) {
+      char b[24];
+      int l = snprintf(b, sizeof b, "%zu", i);
+      e[n].key = scr_str_new(b, (size_t)l);
+      e[n++].val = d->v.arr.items[i];
+    }
+  } else {
+    for (size_t i = 0; i < d->v.obj.len; i++) {
+      if (d->v.obj.entries[i].value == scr_dyn_acc_slot()) continue;
+      e[n].key = scr_str_new(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
+      e[n++].val = d->v.obj.entries[i].value;
+    }
+  }
+  *out = e;
+  return n;
+}
+static void tbl_ents_free(TblEnt *e, size_t n) {
+  for (size_t i = 0; i < n; i++) scr_str_release(e[i].key);
+  free(e);
+}
+
+/* data: the first argument boxed; props: the optional column array boxed (undefined when absent). Returns the table text, +1. */
+ScrStr *scr_insp_table(ScrDyn *data, ScrDyn *props) {
+  TblEnt *rows = NULL;
+  size_t nrows = tbl_entries(data, &rows);
+  size_t ncols = 0, colcap = 8;
+  ScrStr **colkeys = malloc(colcap * sizeof *colkeys);
+  ScrStr ***cells = malloc(colcap * sizeof *cells); /* cells[c][r], NULL = absent (a hole) */
+  ScrStr **prim = calloc(nrows ? nrows : 1, sizeof *prim);
+  bool has_prims = false;
+  bool have_props = props != NULL && props->kind == SCR_DYN_ARR;
+  ScrStr **pk = NULL;
+  size_t npk = 0;
+  if (have_props) {
+    npk = props->v.arr.len;
+    pk = malloc((npk ? npk : 1) * sizeof *pk);
+    for (size_t i = 0; i < npk; i++) pk[i] = scr_dyn_string_coerce(props->v.arr.items[i]);
+  }
+  for (size_t r = 0; r < nrows; r++) {
+    ScrDyn *item = rows[r].val;
+    bool primitive = !(item->kind == SCR_DYN_OBJ || item->kind == SCR_DYN_ARR || item->kind == SCR_DYN_FUNC || item->kind == SCR_DYN_HANDLE) || item->kind == SCR_DYN_NULL;
+    if (!have_props && primitive) {
+      has_prims = true;
+      prim[r] = tbl_cell(item);
+      continue;
+    }
+    TblEnt *ie = NULL;
+    size_t nie = 0;
+    if (!primitive && (item->kind == SCR_DYN_OBJ || item->kind == SCR_DYN_ARR)) nie = tbl_entries(item, &ie);
+    size_t nk = have_props ? npk : nie;
+    for (size_t k = 0; k < nk; k++) {
+      ScrStr *key = have_props ? pk[k] : ie[k].key;
+      size_t c = 0;
+      while (c < ncols && !(colkeys[c]->len == key->len && memcmp(colkeys[c]->data, key->data, key->len) == 0)) c++;
+      if (c == ncols) {
+        if (ncols == colcap) {
+          colcap *= 2;
+          colkeys = realloc(colkeys, colcap * sizeof *colkeys);
+          cells = realloc(cells, colcap * sizeof *cells);
+        }
+        colkeys[ncols] = scr_str_retain(key);
+        cells[ncols] = calloc(nrows ? nrows : 1, sizeof **cells);
+        ncols++;
+      }
+      ScrDyn *found = NULL;
+      for (size_t q = 0; q < nie; q++) {
+        if (ie[q].key->len == key->len && memcmp(ie[q].key->data, key->data, key->len) == 0) { found = ie[q].val; break; }
+      }
+      cells[c][r] = (primitive && have_props) || found == NULL ? scr_str_new("", 0) : tbl_cell(found);
+    }
+    if (ie) tbl_ents_free(ie, nie);
+  }
+  /* head and columns: (index), the keys, then Values for primitive rows */
+  size_t total = ncols + 1 + (has_prims ? 1 : 0);
+  ScrStr **head = malloc(total * sizeof *head);
+  ScrStr ***col = malloc(total * sizeof *col);
+  head[0] = scr_str_new("(index)", 7);
+  col[0] = malloc((nrows ? nrows : 1) * sizeof **col);
+  for (size_t r = 0; r < nrows; r++) col[0][r] = scr_str_retain(rows[r].key);
+  for (size_t c = 0; c < ncols; c++) { head[c + 1] = colkeys[c]; col[c + 1] = cells[c]; }
+  if (has_prims) { head[total - 1] = scr_str_new("Values", 6); col[total - 1] = prim; }
+  size_t *wid = malloc(total * sizeof *wid);
+  for (size_t c = 0; c < total; c++) {
+    wid[c] = tbl_width(head[c]);
+    for (size_t r = 0; r < nrows; r++) {
+      size_t w = col[c][r] ? tbl_width(col[c][r]) : 0;
+      if (w > wid[c]) wid[c] = w;
+    }
+  }
+  TblBuf b = {0};
+  #define TB_RULE(L, M, R) do { tb_lit(&b, L); for (size_t c = 0; c < total; c++) { if (c) tb_lit(&b, M); for (size_t k = 0; k < wid[c] + 2; k++) tb_lit(&b, "\xe2\x94\x80"); } tb_lit(&b, R); } while (0)
+  TB_RULE("\xe2\x94\x8c", "\xe2\x94\xac", "\xe2\x94\x90\n");
+  #define TB_ROW(GET) do { tb_lit(&b, "\xe2\x94\x82 "); for (size_t c = 0; c < total; c++) { const ScrStr *cell = (GET); size_t w = 0; if (cell) { tb_put(&b, cell->data, cell->len); w = tbl_width(cell); } for (size_t k = w; k < wid[c]; k++) tb_lit(&b, " "); if (c != total - 1) tb_lit(&b, " \xe2\x94\x82 "); } tb_lit(&b, " \xe2\x94\x82\n"); } while (0)
+  TB_ROW(head[c]);
+  TB_RULE("\xe2\x94\x9c", "\xe2\x94\xbc", "\xe2\x94\xa4\n");
+  for (size_t r = 0; r < nrows; r++) TB_ROW(col[c][r]);
+  TB_RULE("\xe2\x94\x94", "\xe2\x94\xb4", "\xe2\x94\x98");
+  ScrStr *out = scr_str_new(b.p ? b.p : "", b.len);
+  free(b.p);
+  for (size_t c = 0; c < total; c++) {
+    scr_str_release(head[c]);
+    for (size_t r = 0; r < nrows; r++) if (col[c][r]) scr_str_release(col[c][r]);
+    free(col[c]);
+  }
+  free(head); free(col); free(wid); free(colkeys); free(cells);
+  if (!has_prims) free(prim);
+  for (size_t i = 0; i < npk; i++) scr_str_release(pk[i]);
+  free(pk);
+  tbl_ents_free(rows, nrows);
+  return out;
+}
+
+ScrStr *scr_insp_table1(ScrDyn *data) { return scr_insp_table(data, NULL); }
