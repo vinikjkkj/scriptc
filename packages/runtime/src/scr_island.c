@@ -388,6 +388,7 @@ enum {
   ISL_H_HASOWN,
   ISL_H_ASSIGN,
   ISL_H_ITERDRAIN,
+  ISL_H_DELSTR,
 #ifdef SCR_SYMTAB
   ISL_H_HASKEY,
   ISL_H_DELKEY,
@@ -465,7 +466,9 @@ static const char isl_prelude[] =
     "else if(typeof v===\"number\")d=\"number \"+v;else if(typeof v===\"boolean\")d=\"boolean \"+v;"
     "else if(typeof v===\"function\")d=\"function\";else d=\"object\";"
     "throw new TypeError(d+\" is not iterable (cannot read property Symbol(Symbol.iterator))\")}"
-    "const o=[];for(const x of v)o.push(x);return o}"
+    "const o=[];for(const x of v)o.push(x);return o},"
+    /* ISL_H_DELSTR: `delete o[k]` over a wrapped receiver (string key), the engine's own answer */
+    "(o,k)=>delete o[k]"
 #ifdef SCR_SYMTAB
     /* the symbol-keyed Object statics a wrapped receiver routes here (`k in o`, delete, defineProperty, the symbol keys, and
      * propertyIsEnumerable): the engine's own semantics */
@@ -1925,6 +1928,21 @@ static int isl_dynjs_has_own(ScrJsval *cell, const ScrStr *k) {
   return b > 0 ? 1 : 0;
 }
 
+static int isl_dynjs_key_delete(ScrJsval *cell, const ScrStr *k) {
+  isl_entry();
+  JSValue key = JS_NewStringLen(isl_ctx, k->data, k->len);
+  JSValue argv[2] = {cell->v, key};
+  JSValue r = JS_Call(isl_ctx, isl_helpers[ISL_H_DELSTR], JS_UNDEFINED, 2, argv);
+  JS_FreeValue(isl_ctx, key);
+  if (JS_IsException(r)) {
+    isl_bridge_exception();
+    return -1;
+  }
+  int b = JS_ToBool(isl_ctx, r);
+  JS_FreeValue(isl_ctx, r);
+  return b > 0 ? 1 : 0;
+}
+
 static ScrDyn *isl_dynjs_get_own_desc(ScrJsval *cell, const ScrDyn *keyd) {
   isl_entry();
   JSValue key;
@@ -2113,6 +2131,7 @@ static const ScrDynJsvalOps isl_dynjs_ops = {
   isl_dynjs_bin_kind,
   scr_jsval_exit_bin,
   isl_dynjs_get_own_desc,
+  isl_dynjs_key_delete,
 #ifdef SCR_SYMTAB
   isl_dynjs_sym_op,
 #endif
