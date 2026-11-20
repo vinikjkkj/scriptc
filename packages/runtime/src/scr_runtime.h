@@ -11292,6 +11292,12 @@ typedef struct ScrBigInt {
   uint32_t limbs[];
 } ScrBigInt;
 
+/* A bigint LITERAL the compiler built at compile time: an immortal (rc == SIZE_MAX) static, so its +1 and every release are no-ops
+ * and no parse or allocation happens at run time. Like SCR_STR_LIT it is an anonymous struct cast to `ScrBigInt *`; the static
+ * assert keeps the layout single-sourced with the real type. n >= 1 (a zero literal still owns one limb slot). */
+#define SCR_BIG_LIT(n) struct { size_t rc; int sign; size_t n_; size_t cap; uint32_t limbs[n]; }
+_Static_assert(offsetof(ScrBigInt, limbs) == offsetof(SCR_BIG_LIT(1), limbs), "SCR_BIG_LIT layout");
+
 ScrBigInt *scr_big_retain(ScrBigInt *b);
 void scr_big_release(ScrBigInt *b);
 ScrBigInt *scr_big_zero(void);

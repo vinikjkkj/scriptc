@@ -292,6 +292,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         return E.newTemp(e.type, retainCallC(e.type, `(ScrStr *)&${sym}`));
       }
       case "bigLit": {
+        // An immortal static built at compile time: no parse, no allocation, and the +1 and every release are runtime no-ops.
+        const bigSym = e.type.kind === "bigint" ? E.internBig(e.text) : null;
+        if (bigSym !== null) return E.newImmortalTemp(e.type, `(ScrBigInt *)&${bigSym}`);
         const spelling = Buffer.from(e.text, "utf8");
         return E.newTemp(
           e.type,

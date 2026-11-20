@@ -1907,6 +1907,9 @@ class LlEmitter {
    * immortal (rc == SIZE_MAX) static per (union, unit tag), exactly the
    * C emitter's table. RC entry points and the collector skip immortals. */
   private readonly unitInstances = new Map<string, string>();
+  /** Interned bigint literals: spelling -> { symbol, 32-bit limbs } — one immortal (rc == SIZE_MAX) static per literal, the C
+   * emitter's table. */
+  private readonly bigInstances = new Map<string, { sym: string; limbs: number[] }>();
   /** Interned regex literals: "<flags>/<pattern>" → { symbol, interned
    * source/flags literal refs } — one immortal ScrRegex per distinct
    * (pattern, flags) pair; the bytecode slot starts null and the runtime
@@ -2986,6 +2989,15 @@ class LlEmitter {
       );
     }
     if (this.unitInstances.size > 0) out.push(``);
+    for (const { sym, limbs } of this.bigInstances.values()) {
+      // { size_t rc, int sign, size_t n, size_t cap, uint32_t limbs[k] }: LLVM pads the i32 to the i64 exactly as C does.
+      const k = Math.max(1, limbs.length);
+      out.push(
+        `@${sym} = internal global { i64, i32, i64, i64, [${k} x i32] } ` +
+          `{ i64 -1, i32 ${limbs.length === 0 ? 0 : 1}, i64 ${limbs.length}, i64 ${k}, [${k} x i32] [${(limbs.length === 0 ? [0] : limbs).map((l) => `i32 ${l}`).join(", ")}] }`,
+      );
+    }
+    if (this.bigInstances.size > 0) out.push(``);
     for (const [key, re] of this.regexInstances) {
       // One immortal ScrRegex per (pattern, flags) literal, pointing at
       // the interned source/flags strings. The bc slot starts null (lazy
@@ -3994,6 +4006,21 @@ class LlEmitter {
   }
 
   // ── plumbing (the CEmitter frame/scope machinery, alloca-flavored) ──────
+
+  /** The immortal static for a bigint literal (`@`-ref), or null when the spelling is not one BigInt() reads. */
+  internBig(text: string): string | null {
+    let ent = this.bigInstances.get(text);
+    if (!ent) {
+      let v: bigint;
+      try { v = BigInt(text); } catch { return null; }
+      if (v < 0n) return null;
+      const limbs: number[] = [];
+      for (; v > 0n; v >>= 32n) limbs.push(Number(v & 0xffffffffn));
+      ent = { sym: `sc_big_${this.bigInstances.size}`, limbs };
+      this.bigInstances.set(text, ent);
+    }
+    return `@${ent.sym}`;
+  }
 
   internLiteral(text: string): string {
     let lit = this.literals.get(text);
@@ -12951,6 +12978,8 @@ class LlEmitter {
       // exist, and all NINETEEN big.* operations were already in
       // LIB_FN_SYMS. Only the literal had no route.
       case "bigLit": {
+        const bigSym = e.type.kind === "bigint" ? this.internBig(e.text) : null;
+        if (bigSym !== null) return this.ownImmortal({ name: bigSym, type: e.type });
         const len = Buffer.byteLength(e.text, "utf8");
         this.declare(`declare ptr @scr_big_parse(ptr, i64)`);
         const t = B.tmp();
