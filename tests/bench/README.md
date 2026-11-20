@@ -8,7 +8,7 @@ One job per program. The compiler under test is checked out from `target`; this 
 
 | step | script | what |
 |---|---|---|
-| fetch | `harness/fetch-tree.sh` | the zapo-js 1.8.2 checkout (commit 757a8071b819..., the one scriptc's provenance resolves), `npm ci` of `app/package.json`, pmon built from `harness/pmon.c` |
+| fetch | `harness/fetch-tree.sh` | the zapo-js 1.12.0 checkout (commit 1147011e218e..., the one scriptc's provenance resolves), `npm ci` of `app/package.json`, pmon built from `harness/pmon.c` |
 | program | `harness/mkbench.sh <store>` | `bench-messaging-<store>` from the checkout's own bench dir plus the measurement ladder (`ladder-*.mjs`); the checkout is never edited |
 | build | `harness/build.sh <store> <backend> <out> <variant>` | the scriptc CLI over the entry; variants `plain` and `census` share ONE lowering (see below) |
 | run | `harness/run.mjs` | pmon-wrapped runs, interleaved, a Node reference run, smaps at the peak, optional callgrind |
