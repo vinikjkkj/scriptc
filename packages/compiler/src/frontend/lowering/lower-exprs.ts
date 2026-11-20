@@ -3724,7 +3724,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // Returned WITHOUT maybeNarrow, like Error.prototype above: tsc types the read `String`, and a string dynCheck would
         // turn the sentinel into a primitive with no identity.
         if (!L.dynamic && !expr.questionDotToken) {
-          for (const [primIdx, primName] of ["String", "Number", "Boolean"].entries()) {
+          for (const [primIdx, primName] of ["String", "Number", "Boolean", "Array"].entries()) {
             if (L.stdlibGlobalMember(expr, primName) === "prototype") {
               return { kind: "libCall", fn: "dyn.primPrototype", args: [{ kind: "numLit", value: primIdx, type: F64, loc: locOf(expr) }], type: DYN, loc: locOf(expr) };
             }

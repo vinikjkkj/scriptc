@@ -877,6 +877,8 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
 
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
+ScrStr *(*scr_dyn_str_case_hook)(const ScrStr *s, int to_lower) = NULL;
+
 static bool dyn_str_proto_unimpl(const char *m) {
   /* One packed byte table, not an array of pointers: a pointer table is a startup relocation per entry (the gated compare below stopped
    * the compiler from unrolling it into immediates). */
@@ -1740,8 +1742,29 @@ static ScrDyn *dyn_rebound_intrinsic_call(const ScrDyn *fn, const ScrDyn *thisv,
   ScrDyn *recv0 = (ScrDyn *)scr_box_get_ref(scr_dyn_fn_clo(fn)->caps[0]); /* +1 */
   ScrDyn *name = (ScrDyn *)scr_box_get_ref(scr_dyn_fn_clo(fn)->caps[1]);  /* +1 */
   ScrDyn *r = NULL;
-  if (thisv->kind == recv0->kind && (thisv->kind == SCR_DYN_ARR || thisv->kind == SCR_DYN_STR || thisv->kind == SCR_DYN_BYTES)) {
+  if (thisv->kind == recv0->kind && (thisv->kind == SCR_DYN_ARR || thisv->kind == SCR_DYN_STR || thisv->kind == SCR_DYN_BYTES ||
+                                     thisv->kind == SCR_DYN_NUM || thisv->kind == SCR_DYN_BOOL)) {
     r = scr_dyn_invoke((ScrDyn *)thisv, name->v.str->data, args, argc, "a built-in method");
+  } else if (recv0->kind == SCR_DYN_STR && thisv->kind != SCR_DYN_UNDEF && thisv->kind != SCR_DYN_NULL) {
+    /* A String.prototype method over another receiver: RequireObjectCoercible(this), then ToString(this). */
+    ScrStr *cs = scr_dyn_string_coerce(thisv);
+    if (cs != NULL) {
+      ScrDyn *sv = scr_dyn_new_str(cs);
+      scr_str_release(cs);
+      r = scr_dyn_invoke(sv, name->v.str->data, args, argc, "a built-in method");
+      scr_dyn_release(sv);
+    }
+  } else if (recv0->kind == SCR_DYN_STR) {
+    static const char msg[] = "String.prototype method called on null or undefined";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+  } else if (recv0->kind == SCR_DYN_ARR && (thisv->kind == SCR_DYN_STR || thisv->kind == SCR_DYN_OBJ) &&
+             (dyn_name_is(name->v.str->data, "slice") || dyn_name_is(name->v.str->data, "indexOf") ||
+              dyn_name_is(name->v.str->data, "lastIndexOf") || dyn_name_is(name->v.str->data, "includes") ||
+              dyn_name_is(name->v.str->data, "join") || dyn_name_is(name->v.str->data, "at"))) {
+    /* A read-only, callback-free Array.prototype method over a string or array-like object: an exact copy of its elements. */
+    ScrDyn *al = scr_arrlike_from_read(thisv);
+    if (al != NULL && !scr_exc_pending()) r = scr_dyn_invoke(al, name->v.str->data, args, argc, "a built-in method");
+    if (al != NULL) scr_dyn_release(al);
   } else {
     dyn_throw_unsupported("Function", "call/apply of a built-in method over a receiver of another kind");
   }
@@ -2873,6 +2896,12 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
      * So they fence, loudly and by name, through dyn_str_proto_unimpl
      * below -- true where "is not a function" was false. Pinned as 4152.
      */
+    if (scr_dyn_str_case_hook != NULL && (dyn_name_is(method, "toUpperCase") || dyn_name_is(method, "toLowerCase"))) {
+      ScrStr *r = scr_dyn_str_case_hook(s, dyn_name_is(method, "toLowerCase"));
+      ScrDyn *d = scr_dyn_new_str(r);
+      scr_str_release(r);
+      return d;
+    }
     if (dyn_name_is(method, "trim") || dyn_name_is(method, "trimStart") ||
         dyn_name_is(method, "trimEnd")) {
       ScrStr *r = dyn_name_is(method, "trim")        ? scr_str_trim(s)

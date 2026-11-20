@@ -1032,6 +1032,7 @@ static ScrStr *scr_str_case_conv(const ScrStr *s, int to_lower) {
 
 ScrStr *scr_str_to_lower(const ScrStr *s) { return scr_str_case_conv(s, 1); }
 ScrStr *scr_str_to_upper(const ScrStr *s) { return scr_str_case_conv(s, 0); }
+__attribute__((constructor)) static void scr_regex_install_case_hook(void) { scr_dyn_str_case_hook = scr_str_case_conv; }
 
 /* ── String.prototype.normalize (the static path) ────────────────────────
  * ECMA-262 String.prototype.normalize over the vendored libunicode's

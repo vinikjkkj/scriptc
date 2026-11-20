@@ -1437,6 +1437,8 @@ ScrStr *scr_str_trim(ScrStr *s);
  * sets the regex link flag for case-conversion sites). Borrow s; +1. */
 ScrStr *scr_str_to_lower(const ScrStr *s);
 ScrStr *scr_str_to_upper(const ScrStr *s);
+/* Installed by scr_regex.c when it is linked: the dyn String arm of toUpperCase/toLowerCase (to_lower 0/1). NULL otherwise. */
+extern ScrStr *(*scr_dyn_str_case_hook)(const ScrStr *s, int to_lower);
 
 /* normalize(form): ECMA-262 String.prototype.normalize via libunicode's
  * unicode_normalize, in scr_regex.c with the case conversion (the lre link
