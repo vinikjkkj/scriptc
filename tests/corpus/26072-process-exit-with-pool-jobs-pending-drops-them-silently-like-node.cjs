@@ -1,3 +1,4 @@
+// @exit: 7
 "use strict";
 // process.exit() while worker-pool jobs are queued, running and finished but
 // undelivered: the callbacks never run, nothing is printed for them, and the
