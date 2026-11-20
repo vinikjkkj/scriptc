@@ -1132,6 +1132,8 @@ void scr_error_init(void *obj, int kind, ScrStr *message);
 /* ECMA Error.prototype.toString: "", name, message, or "name: message".
  * Borrows e, returns +1. */
 ScrStr *scr_error_to_string(ScrError *e);
+/* The header an uncaught / unhandled-rejection report prints for an Error (Node's improveStack of the stack header); +1. */
+ScrStr *scr_error_report_header(ScrError *e);
 
 /* `e.stack` -- the header a zero-frame capture produces, MEMOISED at the
  * first read the way V8 memoises its formatted stack. +1. */

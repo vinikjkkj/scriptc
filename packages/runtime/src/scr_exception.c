@@ -407,7 +407,7 @@ void scr_exc_print_uncaught(void) {
      * line: "name: message" (toString rules for the empty halves). Node
      * appends a stack trace; scriptc has none (documented divergence). */
     if (scr_error_is(scr_exc_payload)) {
-      ScrStr *s = scr_error_to_string((ScrError *)scr_exc_payload);
+      ScrStr *s = scr_error_report_header((ScrError *)scr_exc_payload);
       fwrite(s->data, 1, s->len, stderr);
       scr_str_release(s);
       ScrStr *dec = scr_error_report_suffix(scr_exc_payload);

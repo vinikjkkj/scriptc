@@ -4392,7 +4392,7 @@ bool scr_report_unhandled_rejections(void) {
         case SCR_EXC_OBJ:
           /* Error rejections render "name: message", like the uncaught path. */
           if (scr_error_is(p->payload)) {
-            ScrStr *s = scr_error_to_string((ScrError *)p->payload);
+            ScrStr *s = scr_error_report_header((ScrError *)p->payload);
             fwrite(s->data, 1, s->len, stderr);
             scr_str_release(s);
             break;
