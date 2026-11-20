@@ -379,6 +379,8 @@ struct JSRuntime {
     void *host_promise_rejection_tracker_opaque;
 
     struct list_head job_list; /* list of JSJobEntry.link */
+    void (*job_enqueue_hook)(void *opaque); /* scriptc local change: called after every enqueue */
+    void *job_enqueue_opaque;
 
     bool module_normalize_has_attr;
     union {
@@ -2488,7 +2490,16 @@ int JS_EnqueueJob(JSContext *ctx, JSJobFunc *job_func,
         e->argv[i] = js_dup(argv[i]);
     }
     list_add_tail(&e->link, &rt->job_list);
+    if (rt->job_enqueue_hook)
+        rt->job_enqueue_hook(rt->job_enqueue_opaque);
     return 0;
+}
+
+/* scriptc local change: the host learns of each queued job, so it can interleave the engine's microtask queue with its own. */
+void JS_SetJobEnqueueHook(JSRuntime *rt, void (*hook)(void *opaque), void *opaque)
+{
+    rt->job_enqueue_hook = hook;
+    rt->job_enqueue_opaque = opaque;
 }
 
 bool JS_IsJobPending(JSRuntime *rt)
