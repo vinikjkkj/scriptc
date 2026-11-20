@@ -5160,6 +5160,8 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
       const viaDynOk = (t: IrType, seen: Set<string>): boolean => {
         switch (t.kind) {
           case "dyn": case "f64": case "string": case "bool": case "nullT": return true;
+          // A typed array or Buffer: the dyn walker serializes the box exactly as Node does (index keys, null for a non-finite element, Buffer's toJSON form).
+          case "bytes": return t.elem !== "buf";
           case "object": return isDynErrorClass(t.className);
           case "array": return viaDynOk(t.elem, seen);
           case "record": {

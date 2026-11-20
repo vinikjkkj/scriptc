@@ -2256,7 +2256,7 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
   }
   if (src->kind == SCR_DYN_BYTES && !dyn_bytes_is_dataview(src)) {
     for (size_t i = 0; i < src->v.bytes->len; i++) {
-      scr_dyn_arr_push(arr, scr_dyn_new_num((double)src->v.bytes->data[i]));
+      scr_dyn_arr_push(arr, scr_dyn_bytes_elem(src->v.bytes, i)); /* the element at its own width */
     }
     return;
   }
@@ -5508,7 +5508,7 @@ ScrDyn *scr_arrlike_from(const ScrDyn *v) {
   if (v->kind == SCR_DYN_BYTES || v->kind == SCR_DYN_ARRBUF) {
     const ScrBytes *b = v->v.bytes;
     ScrDyn *d = scr_dyn_new_arr();
-    for (size_t i = 0; i < b->len; i++) scr_dyn_arr_push(d, scr_dyn_new_num((double)b->data[i]));
+    for (size_t i = 0; i < b->len; i++) scr_dyn_arr_push(d, v->kind == SCR_DYN_BYTES ? scr_dyn_bytes_elem(b, i) : scr_dyn_new_num((double)b->data[i]));
     return d;
   }
   if (v->kind == SCR_DYN_NUM || v->kind == SCR_DYN_BOOL) return scr_dyn_new_arr();
@@ -7778,6 +7778,11 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * for the Buffer flavor; a plain Uint8Array stringifies index-keyed
      * ({"0":1,...}), also Node. */
     const ScrBytes *bytes = d->v.bytes;
+    /* A bigint view's first element is a bigint, and JSON.stringify throws on every bigint (an empty view still writes {}). */
+    if (bytes->len > 0 && scr_dyn_bytes_is_big(bytes)) {
+      scr_dyn_big_json_throw();
+      return true;
+    }
     if (d->buffer) scr_jb_puts(b, "{\"type\":\"Buffer\",\"data\":[");
     else scr_jb_putc(b, '{');
     for (size_t i = 0; i < bytes->len; i++) {
@@ -8946,16 +8951,18 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
      * its bytes like a Uint8Array and String(dv) answered "1,2,3,...". */
     if (d->v.bytes->flavor == SCR_BF_DATAVIEW) return scr_str_new("[object DataView]", 17);
     if (d->buffer) return scr_bytes_to_str(d->v.bytes, enc);
-    /* Uint8Array.prototype.toString is Array's: elements joined */
+    /* TypedArray.prototype.toString is Array's: the elements (at their own width) joined with "," */
     {
       ScrStr *out = scr_str_new("", 0);
       for (size_t i = 0; i < d->v.bytes->len; i++) {
-        char n[16];
-        int w = snprintf(n, sizeof n, i > 0 ? ",%u" : "%u", (unsigned)d->v.bytes->data[i]);
-        ScrStr *piece = scr_str_new(n, (size_t)w);
-        ScrStr *joined = scr_str_concat(out, piece);
+        ScrDyn *el = scr_dyn_bytes_elem(d->v.bytes, i);
+        ScrStr *txt = scr_dyn_to_string(el, NULL);
+        scr_dyn_release(el);
+        ScrStr *comma = scr_str_new(i > 0 ? "," : "", i > 0 ? 1 : 0);
+        ScrStr *joined = scr_str_concat3(out, comma, txt);
         scr_str_release(out);
-        scr_str_release(piece);
+        scr_str_release(comma);
+        scr_str_release(txt);
         out = joined;
       }
       return out;
@@ -11564,8 +11571,9 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
     for (size_t i = 0; i < d->v.bytes->len; i++) {
       if (i > 0) scr_jb_putc(b, ',');
       char idx[32];
-      snprintf(idx, sizeof idx, "\"%zu\":%u", i, (unsigned)d->v.bytes->data[i]);
+      snprintf(idx, sizeof idx, "\"%zu\":", i);
       scr_jb_puts(b, idx);
+      scr_jb_put_f64(b, scr_bytes_get(d->v.bytes, (double)i));
     }
     scr_jb_putc(b, '}');
     return;
@@ -14034,7 +14042,7 @@ static ScrDyn *tbm_iterate(ScrDyn *recv, ScrDyn *const *args, size_t argc, TbmIt
   bool done = false;
   for (size_t step = 0; step < len && !done; step++) {
     const size_t i = rev ? len - 1 - step : step;
-    ScrDyn *item = scr_dyn_new_num((double)b->data[i]);
+    ScrDyn *item = scr_dyn_bytes_elem(b, i);
     ScrDyn *idx = scr_dyn_new_num((double)i);
     ScrDyn *av[3] = { item, idx, recv };
     ScrDyn *r = tbm_call(cb, thisArg, av, 3, "callback");
@@ -14115,12 +14123,12 @@ static ScrDyn *tbm_reduce(ScrDyn *recv, ScrDyn *const *args, size_t argc, bool r
       scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
       return NULL;
     }
-    acc = scr_dyn_new_num((double)b->data[right ? len - 1 : 0]);
+    acc = scr_dyn_bytes_elem(b, right ? len - 1 : 0);
     step = 1;
   }
   for (; step < len; step++) {
     const size_t i = right ? len - 1 - step : step;
-    ScrDyn *item = scr_dyn_new_num((double)b->data[i]);
+    ScrDyn *item = scr_dyn_bytes_elem(b, i);
     ScrDyn *idx = scr_dyn_new_num((double)i);
     ScrDyn *av[4] = { acc, item, idx, recv };
     ScrDyn *r = tbm_call(cb, scr_dyn_undefined(), av, 4, "callback");
@@ -14633,7 +14641,7 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
     if (scr_exc_pending()) return NULL;
     double idx = iD < 0 ? (double)blen + iD : iD;
     if (idx < 0 || idx >= (double)blen) return scr_dyn_retain(scr_dyn_undefined());
-    return scr_dyn_new_num((double)bytes->data[(size_t)idx]);
+    return scr_dyn_bytes_elem(bytes, (size_t)idx);
   }
   /* The rest of the typed-array surface (the tbm_* block above). */
   if (scr_bo_is(method, "fill")) return tbm_fill(recv, args, argc, what);
@@ -16408,7 +16416,7 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
       ScrDyn *val = NULL;
       if (mode != SCR_OBJWALK_KEYS) {
         val = v->kind == SCR_DYN_ARR ? scr_dyn_retain(v->v.arr.items[i])
-                                     : scr_dyn_new_num((double)v->v.bytes->data[i]);
+                                     : scr_dyn_bytes_elem(v->v.bytes, i); /* the element at its own width (a bigint view's is a bigint) */
       }
       if (mode == SCR_OBJWALK_KEYS) {
         scr_dyn_arr_push(out, scr_dyn_objwalk_key(key, (size_t)klen));

@@ -14815,7 +14815,9 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // A static ARRAY's own names are its indices (and `length`), exactly
       // what the dyn tree's walk answers over the array copied in.
       const isArr =
-        objMember === "keys" && probed?.type.kind === "array" && L.dynConvertible(probed.type);
+        probed?.type.kind === "array" && L.dynConvertible(probed.type);
+      // A typed array or Buffer: the same walk over the box (index keys, then the elements, bigint views included).
+      const isBytes = probed?.type.kind === "bytes" && probed.type.elem !== "buf" && L.dynConvertible(probed.type);
       // A CLASS INSTANCE: its own enumerable keys are the fields of the class
       // the instance really is (a base-typed value may hold a subclass), which
       // the dyn box's member table answers through the preorder registry.
@@ -14835,7 +14837,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         (ts.isIdentifier(argNode) && liveDepOfBinding(L, argNode) !== null) ||
         (ts.isIdentifier(argNode) && argNode.text === "exports" && isCjsJsFile(argNode.getSourceFile()) && liveExportsOf(L, argNode.getSourceFile())) ||
         (isModuleExportsAccess(argNode) && liveExportsOf(L, argNode.getSourceFile()));
-      if (isDyn || isUnit || isArr || isInst || liveArg) {
+      if (isDyn || isUnit || isArr || isBytes || isInst || liveArg) {
         const fn = objMember === "keys" ? "dyn.objKeys" : objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
         let v = L.lowerExpr(argNode);
         if (v.type.kind !== "dyn") v = { kind: "dynFrom", value: v, type: DYN, loc: locOf(call) };

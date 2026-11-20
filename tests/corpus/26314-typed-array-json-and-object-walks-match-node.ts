@@ -1,0 +1,34 @@
+const u = new Uint8Array([1,2]);
+console.log(JSON.stringify(u));
+console.log(JSON.stringify(Buffer.from([1,2])));
+console.log(JSON.stringify(new Float64Array([1.5, NaN, -0, Infinity])));
+console.log(JSON.stringify({ u, n: 1 }));
+console.log(JSON.stringify([new Int16Array([5, -6])]));
+console.log(JSON.stringify(new Uint8Array(0)));
+console.log(JSON.stringify(u, null, 2));
+try { console.log(JSON.stringify(new BigInt64Array([1n]))); } catch (e) { console.log((e as Error).name, (e as Error).message); }
+const u6 = new Uint8Array([7, 8]);
+console.log(Object.keys(u6), Object.values(u6), Object.entries(u6));
+const f6 = new Float64Array([1.5, NaN, -0]);
+console.log(Object.keys(f6), Object.values(f6), Object.entries(f6));
+console.log(Object.getOwnPropertyNames(new Int16Array([4, 5])));
+console.log(Object.keys(new Float32Array(0)));
+const b6 = new BigInt64Array([5n, -6n]);
+console.log(Object.keys(b6), Object.values(b6), Object.entries(b6));
+console.log(Object.keys(Buffer.from("hi")), Object.values(Buffer.from("hi")));
+const a6 = [3, 1, 2];
+console.log(Object.values(a6), Object.entries(a6));
+const s6 = ["x", "y"];
+console.log(Object.values(s6), Object.entries(s6));
+for (const [k, v] of Object.entries(u6)) console.log(k, v);
+// typed arrays reached through a dynamic value read every element at its own width
+const x: any = new Float64Array([1.5, 2.25]);
+console.log([...x], String(x), `${x}`, x[1], x.length);
+const y: any = new Int32Array([-5, 70000]);
+console.log([...y], String(y), y[0], Object.assign({}, y), { ...y }, Array.prototype.slice.call(y));
+const z: any = new BigInt64Array([5n]);
+console.log([...z], String(z), z[0], z.at(0));
+const w: any = new Float64Array([1.5, 2, 3.25]);
+console.log(w.at(-1), w.at(0), w.reduce((a: number, b: number) => a + b), w.reduceRight((a: number, b: number) => a + b));
+w.forEach((e: number, i: number) => console.log(e, i));
+console.log(w.find((e: number) => e > 1.6), w.findLast((e: number) => e < 3), w.every((e: number) => e > 1), w.some((e: number) => e > 3), w.toLocaleString());

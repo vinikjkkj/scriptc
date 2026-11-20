@@ -693,7 +693,7 @@ static ScrStr *dyn_locale_str(const ScrDyn *v, int depth, const ScrDyn *locales,
       scr_jb_init(&jb);
       for (size_t i = 0; i < v->v.bytes->len; i++) {
         if (i) scr_jb_putc(&jb, ',');
-        ScrDyn *n = scr_dyn_new_num((double)v->v.bytes->data[i]);
+        ScrDyn *n = scr_dyn_bytes_elem(v->v.bytes, i);
         ScrStr *e = dyn_locale_str(n, depth + 1, locales, opts);
         scr_dyn_release(n);
         if (e == NULL) {
