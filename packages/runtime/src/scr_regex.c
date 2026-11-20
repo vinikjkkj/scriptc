@@ -820,29 +820,44 @@ static bool scr_literal_pattern(const ScrRegex *re) {
   return true;
 }
 
-/* Does `hay` hold `nd` (nlen >= 1)? memchr on the first byte, memcmp of the rest (memmem is not portable to the Windows target). */
-static bool scr_bytes_contain(const char *hay, size_t hlen, const char *nd, size_t nlen) {
+/* The first occurrence of `nd` (nlen >= 1) in `hay`, or NULL: memchr on the first byte, memcmp of the rest (memmem is not portable to the Windows target). */
+static const char *scr_bytes_find(const char *hay, size_t hlen, const char *nd, size_t nlen) {
 #ifdef SCR_OBJ_PLANT_BUG
-  if (SCR_OBJ_PLANT_BUG == 20) return false; /* the planted defect: a literal pattern is never found, so a replace that has matches returns its subject */
+  if (SCR_OBJ_PLANT_BUG == 20) return NULL; /* the planted defect: a literal pattern is never found, so a replace that has matches returns its subject */
 #endif
   const char *p = hay, *end = hay + hlen;
   while (hlen >= nlen && (p = (const char *)memchr(p, nd[0], (size_t)(end - p) - (nlen - 1))) != NULL) {
-    if (memcmp(p + 1, nd + 1, nlen - 1) == 0) return true;
+    if (memcmp(p + 1, nd + 1, nlen - 1) == 0) return p;
     p++;
     hlen = (size_t)(end - p);
   }
-  return false;
+  return NULL;
 }
 
 static ScrStr *scr_replace_impl(ScrStr *s, ScrRegex *re, ScrStr *rep) {
-  /* No occurrence of a pure-literal pattern: the result is the subject itself (+1). Skips the UTF-16 conversion, the capture and output buffers and the
-   * engine, which dominated a global replace that finds nothing. The global flag still leaves lastIndex 0, as the engine path does. */
+  /* A pure-literal pattern is answered on the stored bytes. No occurrence: the result is the subject itself (+1). Occurrences and a replacement with no '$'
+   * directive: the subject with each occurrence (the first only without /g) swapped for the replacement bytes. Both skip the UTF-16 conversion, the capture
+   * buffer and the engine. The global flag still leaves lastIndex 0, as the engine path does. */
   if (scr_literal_pattern(re)) {
-    const ScrStr *src = (re->proto ? re->proto : re)->source;
-    if (!scr_bytes_contain(s->data, s->len, src->data, src->len)) {
-      const ScrStr *fl = (re->proto ? re->proto : re)->flags;
-      for (size_t i = 0; i < fl->len; i++) if (fl->data[i] == 'g') { re->last_index = 0; break; }
-      return scr_str_retain(s);
+    const ScrRegex *pr = re->proto ? re->proto : re;
+    const ScrStr *src = pr->source;
+    bool g = false;
+    for (size_t i = 0; i < pr->flags->len; i++) if (pr->flags->data[i] == 'g') { g = true; break; }
+    const char *hit = scr_bytes_find(s->data, s->len, src->data, src->len);
+    if (hit == NULL || memchr(rep->data, '$', rep->len) == NULL) {
+      if (g) re->last_index = 0;
+      if (hit == NULL) return scr_str_retain(s);
+      ScrJsonBuf b;
+      scr_jb_init(&b);
+      const char *cur = s->data, *end = s->data + s->len;
+      while (hit != NULL) {
+        scr_jb_write(&b, cur, (size_t)(hit - cur));
+        scr_jb_write(&b, rep->data, rep->len);
+        cur = hit + src->len;
+        hit = g ? scr_bytes_find(cur, (size_t)(end - cur), src->data, src->len) : NULL;
+      }
+      scr_jb_write(&b, cur, (size_t)(end - cur));
+      return scr_jb_finish(&b);
     }
   }
   uint8_t *bc = scr_regex_bc(re);
