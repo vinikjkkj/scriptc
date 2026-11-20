@@ -17576,6 +17576,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26421-literal-pattern-replace-swaps-bytes-for-bytes-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26421-literal-pattern-replace-swaps-bytes-for-bytes-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/26420-literal-pattern-replace-finds-nothing-or-something-exactly-like-node.ts": {
    "order": [
     "<repo>/tests/corpus/26420-literal-pattern-replace-finds-nothing-or-something-exactly-like-node.ts"
