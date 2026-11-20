@@ -29855,6 +29855,12 @@
     "<repo>/tests/corpus/25920-math-floor-ceil-trunc-round-answer-every-edge-like-node.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/26022-delete-on-an-island-object-removes-the-property.ts": {
+   "order": [
+    "<repo>/tests/corpus/26022-delete-on-an-island-object-removes-the-property.ts"
+   ],
+   "diags": []
   }
  }
 }

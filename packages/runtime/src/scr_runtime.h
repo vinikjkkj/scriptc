@@ -8374,6 +8374,9 @@ typedef struct ScrDynJsvalOps {
   /* Object.getOwnPropertyDescriptor(cell, key) in the ENGINE (key: a dyn string, or a symbol handle): the engine's descriptor object wrapped (+1),
    * or undefined; NULL with the engine's exception pending. */
   ScrDyn *(*get_own_desc)(ScrJsval *cell, const ScrDyn *key);
+  /* `delete o[k]` in the ENGINE (the property goes from the REAL engine object, aliasing preserved): 1 = the engine answered true, 0 = false
+   * (a non-configurable own property), -1 = the engine threw (bridged, pending). */
+  int (*key_delete)(ScrJsval *cell, const ScrStr *k);
 #ifdef SCR_SYMTAB
   /* A symbol-keyed operation on the ENGINE object (scr_symbol.c routes here, ScrDsymEngineOp): the runtime symbol `k`
    * crosses as THE engine symbol of its identity (one per identity, both directions: scr_island.c's table). +1 result, or
