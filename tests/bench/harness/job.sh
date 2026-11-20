@@ -69,3 +69,6 @@ flags=(--store "$store" --out "$BENCH_WORK/result" --reps "$REPS" --smaps)
 [ "${MASSIF:-0}" != 0 ] && flags+=(--massif "$MASSIF")
 $BENCH_NODE "$BENCH_DIR/harness/run.mjs" "${flags[@]}" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
 summary "$BENCH_WORK/result"
+
+# lab echo (rel1): put the census files an extra_env points at into the log, since artifact egress is over the limit
+for f in "$ART"/*.txt; do [ -f "$f" ] && { echo "=== LABECHO $f"; head -c 30000 "$f"; echo; echo "=== END LABECHO"; }; done
