@@ -308,6 +308,46 @@ static bool scr_error_runtime_minted(const ScrError *e) {
   return false;
 }
 
+/* The header an uncaught or unhandled-rejection REPORT prints for an Error: Node's util.inspect of the error, whose first line is the stack header
+ * rewritten by improveStack. When the error's `name` is still an inherited "...Error" but its CONSTRUCTOR is another class, the header names the
+ * constructor: `ValidationError: v` when the constructor name contains the name, `Quiet [Error]: q` when it does not. An assigned name
+ * (`this.name = 'Named'`) and a "name [code]" header print as scr_error_to_string answers. The constructor name rides the vtable (stamped for
+ * every module with an Error subclass; NULL for the runtime's own kinds, whose name IS the constructor). The same rule scr_inspect.c applies to
+ * an inspected error (insp_err_name_into); this unit is the always-linked one, so the report does not link the inspector. +1. */
+ScrStr *scr_error_report_header(ScrError *e) {
+  ScrStr *s = scr_error_to_string(e);
+  const ScrStr *name = e->name;
+  const ScrStr *ctor = e->vt != NULL ? e->vt->name : NULL;
+  if (name == NULL || ctor == NULL || ctor->len == 0 || name->len < 5 || memcmp(name->data + name->len - 5, "Error", 5) != 0) return s;
+  if (ctor->len == name->len && memcmp(ctor->data, name->data, name->len) == 0) return s;
+  if (s->len < name->len || memcmp(s->data, name->data, name->len) != 0) return s;
+  if (s->len > name->len && s->data[name->len] != ':' && s->data[name->len] != '\n') return s;
+  bool contains = false;
+  if (ctor->len >= name->len) {
+    for (size_t i = 0; i + name->len <= ctor->len && !contains; i++) contains = memcmp(ctor->data + i, name->data, name->len) == 0;
+  }
+  const size_t rest = s->len - name->len;
+  const size_t extra = contains ? 0 : name->len + 3; /* " [" + name + "]" */
+  char *buf = malloc(ctor->len + extra + rest + 1);
+  if (buf == NULL) return s;
+  size_t n = 0;
+  memcpy(buf + n, ctor->data, ctor->len);
+  n += ctor->len;
+  if (!contains) {
+    buf[n++] = ' ';
+    buf[n++] = '[';
+    memcpy(buf + n, name->data, name->len);
+    n += name->len;
+    buf[n++] = ']';
+  }
+  memcpy(buf + n, s->data + name->len, rest);
+  n += rest;
+  ScrStr *out = scr_str_new(buf, n);
+  free(buf);
+  scr_str_release(s);
+  return out;
+}
+
 ScrStr *scr_error_to_string(ScrError *e) {
   /* ECMA-262 Error.prototype.toString over the two fields (no prototype
    * chain exists: constructors always initialize both) — except Node's
