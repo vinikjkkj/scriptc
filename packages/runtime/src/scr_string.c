@@ -434,12 +434,34 @@ static int scr_str_intern_weak(void) {
   return cached;
 }
 
-/* FNV-1a over the CONCATENATION of two spans, without forming it. */
+/* A hash of the CONCATENATION of two spans, without forming it (see scr_str_ihash). */
+static inline unsigned long long scr_ih_mix(unsigned long long h, unsigned long long w) {
+  h = (h ^ w) * 0x9E3779B97F4A7C15ULL;
+  return h ^ (h >> 32);
+}
+/* A word at a time: the hash is over the CONCATENATED stream x||y cut into 8-byte little-endian words (the last one zero padded), so the two-piece
+ * call a concat makes before it has the result and the one-piece call the death and regrow paths make on the stored bytes give the SAME value for
+ * every split point (the pairing the table depends on). The byte-at-a-time FNV this replaced cost ~5 Ir per byte, 157 Ir for a 35-byte result, and
+ * was 27% of a concat-heavy callgrind micro. */
 static unsigned scr_str_ihash(const char *x, size_t nx, const char *y, size_t ny) {
   unsigned long long h = 1469598103934665603ULL;
-  size_t i;
-  for (i = 0; i < nx; i++) { h ^= (unsigned char)x[i]; h *= 1099511628211ULL; }
-  for (i = 0; i < ny; i++) { h ^= (unsigned char)y[i]; h *= 1099511628211ULL; }
+  size_t i = 0;
+  for (; i + 8 <= nx; i += 8) { unsigned long long w; memcpy(&w, x + i, 8); h = scr_ih_mix(h, w); }
+  size_t r = nx - i, j = 0;
+  if (r != 0) { /* the tail of x joins the head of y in one word */
+    unsigned long long w = 0;
+    memcpy(&w, x + i, r);
+    size_t take = 8 - r;
+    if (take > ny) take = ny;
+    if (take != 0) memcpy((char *)&w + r, y, take);
+    j = take;
+    h = scr_ih_mix(h, w);
+  }
+  const char *yp = y + j;
+  size_t yn = ny - j, k = 0;
+  for (; k + 8 <= yn; k += 8) { unsigned long long w; memcpy(&w, yp + k, 8); h = scr_ih_mix(h, w); }
+  size_t t = yn - k;
+  if (t != 0) { unsigned long long w = 0; memcpy(&w, yp + k, t); h = scr_ih_mix(h, w); }
   h ^= (unsigned long long)(nx + ny) * 2654435761ULL;
   h ^= h >> 32;
   return (unsigned)h & (SCR_STR_INTERN_SLOTS - 1u);
