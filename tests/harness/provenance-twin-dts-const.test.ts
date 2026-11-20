@@ -65,11 +65,15 @@ describe("provenance: a declaration-file const owned by its compiled twin", () =
     }, 600_000);
   }
 
-  for (const file of ["call.ts", "value.ts"]) {
-    test(`24050: ${file} uses the value as the declared function type: a compile-time SC2011, not a deferred throw`, async () => {
+  // call.ts calls the value as the declared function type (SC2011 at the call). value.ts STORES it as that type: the object the JS exports does not
+  // width-coerce into the declared function type, so the store is a named compile-time SC2002 (and the comparison of the two function-typed
+  // spellings an SC1043), never a deferred throw. Node v24.15.0 prints "object true", "object", "object" for value.ts: the program is refused,
+  // not mis-run.
+  for (const [file, code] of [["call.ts", "SC2011"], ["value.ts", "SC2002"]] as const) {
+    test(`24050: ${file} uses the value as the declared function type: a compile-time ${code}, not a deferred throw`, async () => {
       const { result } = await build(file, "c");
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.diagnostics.map((d) => d.code)).toContain("SC2011");
+      if (!result.ok) expect(result.diagnostics.map((d) => d.code)).toContain(code);
     }, 600_000);
   }
 
