@@ -13263,11 +13263,18 @@ void scr_work_submit_cost(ScrWork *w, double est_us);
  * with a blocking call whose outcome is already known (fs/promises, the
  * asymmetric-crypto promises). */
 ScrPromise *scr_promise_settle_later(ScrPromise *settled);
-/* The loop-side registration (scr_async.c, always linked). `wait` is the
- * Windows bounded sleep (NULL elsewhere: the poll(2) fd serves); teardown
- * drops every undelivered job (done(w,false)) after running ones finish. */
-void scr_loop_set_pool(bool (*pending)(void), void (*dispatch)(void), int (*pollfd)(void),
-                       bool (*wait)(double ms), void (*teardown)(void));
+/* The loop-side registration (scr_async.c, always linked): one table, so a
+ * loop without a pool user pays for a single pointer. `wait` is the Windows
+ * bounded sleep (NULL elsewhere: the poll(2) fd serves); teardown drops every
+ * undelivered job (done(w,false)) after running ones finish. */
+typedef struct {
+  bool (*pending)(void);
+  void (*dispatch)(void);
+  int (*pollfd)(void);
+  bool (*wait)(double ms);
+  void (*teardown)(void);
+} ScrPoolHooks;
+void scr_loop_set_pool(const ScrPoolHooks *hooks);
 
 /* ── node:test (scr_test.c — compiled only when the program imports it;
  * design note atop the file). Registration builds the test tree while

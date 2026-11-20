@@ -243,6 +243,21 @@ static bool scr_pl_wait(double ms) {
 }
 #endif
 
+static void scr_pl_teardown(void);
+static void scr_pl_dispatch(void);
+
+static const ScrPoolHooks scr_pl_hooks = {
+    scr_pl_pending,
+    scr_pl_dispatch,
+    scr_pl_pollfd,
+#if defined(_WIN32)
+    scr_pl_wait,
+#else
+    NULL,
+#endif
+    scr_pl_teardown,
+};
+
 static void scr_pl_batch_append(ScrWork *head) {
   if (head == NULL) return;
   ScrWork *tail = head;
@@ -378,11 +393,7 @@ static void scr_pl_init(void) {
     P.stats = true;
     atexit(scr_pl_report);
   }
-#if defined(_WIN32)
-  scr_loop_set_pool(scr_pl_pending, scr_pl_dispatch, scr_pl_pollfd, scr_pl_wait, scr_pl_teardown);
-#else
-  scr_loop_set_pool(scr_pl_pending, scr_pl_dispatch, scr_pl_pollfd, NULL, scr_pl_teardown);
-#endif
+  scr_loop_set_pool(&scr_pl_hooks);
 }
 
 void scr_work_submit(ScrWork *w) { scr_work_submit_cost(w, 1e18); }
