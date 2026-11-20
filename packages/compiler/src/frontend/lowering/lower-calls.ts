@@ -8366,7 +8366,7 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   "toExponential", "toPrecision",
   // String.prototype names the dyn String arm now runs through scr_dyn_str_ext_hook (scr_regex.c): the dot spelling reaches it instead of
   // refusing by name.
-  "isWellFormed", "toWellFormed", "toLocaleLowerCase", "toLocaleUpperCase",
+  "isWellFormed", "toWellFormed", "toLocaleLowerCase", "toLocaleUpperCase", "localeCompare",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
   // boxed through the checked-dynamic boundary): these names dispatch on
   // the runtime kind so a boxed IncomingMessage/ServerResponse/Socket

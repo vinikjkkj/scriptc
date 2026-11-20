@@ -1823,12 +1823,25 @@ static ScrDyn *dyn_strext_str(ScrStr *r) {
 
 static bool dyn_strext_is(const char *m, const char *n) { return strcmp(m, n) == 0; }
 
+/* scr_collate.c installs the CLDR root collation here; a program whose dyn localeCompare links it (moduleUsesCollate) always has it. */
+double (*scr_str_collate_hook)(const ScrStr *a, const ScrStr *b) = NULL;
+
 static ScrDyn *scr_dyn_str_ext_method(ScrDyn *recv, const char *m, ScrDyn *const *args, size_t argc, bool *handled) {
   *handled = true;
   ScrStr *s = (ScrStr *)recv->v.str;
   const ScrDyn *a0 = argc > 0 ? args[0] : NULL;
   const ScrDyn *a1 = argc > 1 ? args[1] : NULL;
   const bool u0 = a0 == NULL || a0->kind == SCR_DYN_UNDEF;
+  if (dyn_strext_is(m, "localeCompare")) {
+    /* the locales / options arguments select tailorings and options that the one-argument root comparison does not run */
+    const ScrDyn *a2 = argc > 2 ? args[2] : NULL;
+    if (scr_str_collate_hook == NULL || (a1 != NULL && a1->kind != SCR_DYN_UNDEF) || (a2 != NULL && a2->kind != SCR_DYN_UNDEF)) { *handled = false; return NULL; }
+    ScrStr *t = scr_dyn_string_coerce(a0 != NULL ? a0 : scr_dyn_undefined());
+    if (t == NULL) return NULL;
+    double r = scr_str_collate_hook(s, t);
+    scr_str_release(t);
+    return scr_dyn_new_num(r);
+  }
   if (dyn_strext_is(m, "isWellFormed")) return scr_dyn_new_bool(scr_str_is_well_formed(s));
   if (dyn_strext_is(m, "toWellFormed")) return dyn_strext_str(scr_str_to_well_formed(s));
   if (dyn_strext_is(m, "toLocaleLowerCase") || dyn_strext_is(m, "toLocaleUpperCase")) {

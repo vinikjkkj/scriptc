@@ -17665,6 +17665,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26102-locale-compare-orders-by-the-root-collation-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26102-locale-compare-orders-by-the-root-collation-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26103-dyn-locale-compare-orders-by-the-root-collation-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26103-dyn-locale-compare-orders-by-the-root-collation-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2611-regex-named-groups-js.cjs": {
    "order": [
     "<repo>/tests/corpus/2611-regex-named-groups-js.cjs"

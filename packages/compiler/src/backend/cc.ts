@@ -287,6 +287,9 @@ export interface CcOptions {
    * JSContext there). Off = regex-free: the command line is exactly the
    * historical one, so regex-free binaries cannot change by a byte. */
   regex?: boolean;
+  /** The program compares strings by the CLDR root collation (moduleUsesCollate): compiles scr_collate.c and its tables.
+   * Always with `regex` (the unit uses the lre normalizer). */
+  collate?: boolean;
   /** The program uses one of the copying/typed-array bridge intrinsics
    * implemented in scr_copying.c (index.ts detects them on the IR).
    * Off keeps that optional TU out of unrelated binaries. */
@@ -2023,6 +2026,7 @@ export interface LibArchiveOptions {
   sanitize?: boolean;
   /** IR-detected link gates (the compileC precedent, refusal-narrowed). */
   regex?: boolean;
+  collate?: boolean;
   assert?: boolean;
   inspect?: boolean;
   symbol?: boolean;
@@ -2076,6 +2080,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     // cannot change by a byte.
     ...(targetPlatform(driver) === "win32" ? ["scr_win.c"] : []),
     ...(regex ? ["scr_regex.c"] : []),
+    ...(regex && opts.collate ? ["scr_collate.c"] : []),
     ...(opts.assert || regex || opts.symbol ? ["scr_assert.c"] : []),
     ...(opts.inspect ? ["scr_inspect.c"] : []),
     ...(opts.symbol ? ["scr_symbol.c"] : []),
@@ -2808,7 +2813,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       ? [rt(join(rtDir, "scr_win.c")), "-ladvapi32", "-liphlpapi", "-lws2_32"]
       : []),
     ...(regex
-      ? ["-I", vendorEngineDir(), rt(join(rtDir, "scr_regex.c")), ...lreObjects]
+      ? ["-I", vendorEngineDir(), rt(join(rtDir, "scr_regex.c")), ...(opts.collate ? [rt(join(rtDir, "scr_collate.c"))] : []), ...lreObjects]
       : []),
     ...(opts.bigint || sqlite ? [rt(join(rtDir, "scr_bigint.c"))] : []),
     ...(opts.bigint && opts.inspect ? [rt(join(rtDir, "scr_bigint_inspect.c"))] : []),

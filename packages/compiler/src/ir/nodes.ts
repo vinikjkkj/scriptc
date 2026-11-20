@@ -3260,6 +3260,8 @@ export type IrStrIntrinsicMethod =
   // true and the identity, per spec on well-formed input.
   | "isWellFormed"
   | "toWellFormed"
+  // localeCompare(that): the CLDR root collation, -1/0/1 (scr_collate.c over scr_regex.c's normalizer; one string argument).
+  | "localeCompare"
   // The string iterator's step: the full code-POINT character at a UTF-16
   // index (astral chars come back whole where charAt truncates) — for-of
   // over strings desugars onto it, advancing by the result's length.
@@ -11124,7 +11126,7 @@ export function moduleUsesRegex(mod: IrModule): boolean {
     // case tables): they ride the same link switch as regex nodes.
     if (kind === "strIntrinsic") {
       const method = (v as { method?: unknown }).method;
-      if (method === "toLowerCase" || method === "toUpperCase" || method === "normalize") {
+      if (method === "toLowerCase" || method === "toUpperCase" || method === "normalize" || method === "localeCompare") {
         found = true;
         return;
       }
@@ -11135,7 +11137,7 @@ export function moduleUsesRegex(mod: IrModule): boolean {
     if (kind === "dynInvoke") {
       const m = (v as { method?: unknown }).method;
       if (m === "split" || m === "match" || m === "replace" || m === "replaceAll" || m === "search" || m === "normalize" || m === "codePointAt" ||
-          m === "isWellFormed" || m === "toWellFormed" || m === "toLocaleLowerCase" || m === "toLocaleUpperCase") {
+          m === "isWellFormed" || m === "toWellFormed" || m === "toLocaleLowerCase" || m === "toLocaleUpperCase" || m === "localeCompare") {
         found = true;
         return;
       }
@@ -13573,6 +13575,27 @@ function moduleUsesInspColorsWalk(mod: IrModule): boolean {
           return;
         }
       }
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** The program compares strings by the CLDR root collation (a localeCompare intrinsic, or a dyn localeCompare the String
+ * extension hook runs): links scr_collate.c and its tables (moduleUsesRegex is on too: the unit uses the lre normalizer). */
+export function moduleUsesCollate(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; method?: unknown };
+    if ((node.kind === "strIntrinsic" || node.kind === "dynInvoke") && node.method === "localeCompare") {
+      found = true;
+      return;
     }
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };

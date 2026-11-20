@@ -423,6 +423,8 @@ export const STR_METHODS: Record<
   // diverged at the string's creation, SEMANTICS.md 2).
   isWellFormed: { method: "isWellFormed", result: BOOL, minArgs: 0, maxArgs: 0 },
   toWellFormed: { method: "toWellFormed", result: STRING, minArgs: 0, maxArgs: 0 },
+  // localeCompare(that): the CLDR root collation (scr_collate.c), the order Node answers with ICU in the default locale.
+  localeCompare: { method: "localeCompare", result: F64, minArgs: 1, maxArgs: 1 },
   // normalize(form?): the form is one of NFC/NFD/NFKC/NFKD (the lowering
   // completes an omitted form to "NFC", Node's default). The lre-backed
   // tables in scr_regex.c, like the case pair above.

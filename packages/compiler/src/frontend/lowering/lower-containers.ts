@@ -8045,14 +8045,10 @@ function staticNumberOf(L: Lowerer, node: ts.Expression): number | null {
   return null;
 }
 
-/** `a.localeCompare(b)` — the one-argument form only (locales/options
-   * select ICU collations that do not exist here). Lowers to an interned
-   * synthetic function returning -1/0/1 by CODE-UNIT order — the same
-   * ordering as the string relational operators — NOT Node's ICU default
-   * collation: a documented divergence (SEMANTICS.md; e.g. Node says
-   * "a" < "B" under ICU while code units say "B" < "a"). For same-case
-   * ASCII the orders agree. Null when the receiver isn't a stdlib string
-   * (caller keeps its generic rejection). */
+/** `a.localeCompare(b)` — the one-argument form (the locales/options forms select tailored collations and options that have no
+   * lowering yet): the CLDR root collation, the order Node answers with ICU in the default locale (scr_collate.c;
+   * "a" < "B", "resume" < "resume" with an accent, digits before letters), as a strIntrinsic. Null when the receiver isn't a stdlib
+   * string (caller keeps its generic rejection). */
   function lowerLocaleCompareCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
@@ -8070,51 +8066,7 @@ function staticNumberOf(L: Lowerer, node: ts.Expression): number | null {
     const receiver = L.lowerExpr(access.expression);
     const arg = L.lowerExpr(call.arguments[0]!);
     if (arg.type.kind !== "string") L.badType(call.arguments[0]!, L.typeOf(call.arguments[0]!));
-    const key = "localeCompare";
-    let helper = L.arrHofHelpers.get(key);
-    if (!helper) {
-      helper = `%str.localeCompare`;
-      L.arrHofHelpers.set(key, helper);
-      L.liftedFns.push(buildLocaleCompareFn(helper, loc));
-    }
-    return { kind: "call", callee: helper, args: [receiver, arg], type: F64, loc };
-  }
-
-/** `return a < b ? -1 : a > b ? 1 : 0` over the strCmp primitive (the
-   * relational operators' exact machinery — one interned helper, no new IR
-   * or runtime surface). */
-  function buildLocaleCompareFn(name: string, loc: SrcLoc): IrFunction {
-    const ref = (localId: string): IrExpr => ({ kind: "varRef", localId, type: STRING, loc });
-    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
-    const cmp = (op: "<" | ">"): IrExpr => ({ kind: "strCmp", op, left: ref("a.0"), right: ref("b.0"), type: BOOL, loc });
-    const body: IrStmt[] = [
-      {
-        kind: "return",
-        value: {
-          kind: "ternary",
-          cond: cmp("<"),
-          then: num(-1),
-          else_: { kind: "ternary", cond: cmp(">"), then: num(1), else_: num(0), type: F64, loc },
-          type: F64,
-          loc,
-        },
-        loc,
-      },
-    ];
-    return {
-      name,
-      params: [
-        { localId: "a.0", name: "a", type: STRING },
-        { localId: "b.0", name: "b", type: STRING },
-      ],
-      returnType: F64,
-      locals: [
-        { id: "a.0", name: "a", type: STRING, mutable: true },
-        { id: "b.0", name: "b", type: STRING, mutable: true },
-      ],
-      body,
-      loc,
-    };
+    return { kind: "strIntrinsic", method: "localeCompare", receiver, args: [arg], type: F64, loc };
   }
 
 /* ── typed arrays / Buffer ─────────────────────────────────────────────── */

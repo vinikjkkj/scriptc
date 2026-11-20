@@ -1179,6 +1179,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return E.newTemp(e.type, `scr_str_is_well_formed(${r.name})`);
           case "toWellFormed":
             return E.newTemp(e.type, `scr_str_to_well_formed(${r.name})`);
+          case "localeCompare":
+            return E.newTemp(e.type, `scr_str_locale_compare(${r.name}, ${args[0]!.name})`);
           case "normalize":
             // Throws a catchable RangeError for an invalid form: the pending
             // check follows the call (the result is NULL on that path).

@@ -26,7 +26,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleBoxesFunctionLikeValues, moduleUsesDestroyDyn, moduleUsesTimersPromisesValue, moduleUsesHttpDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleUsesFrozenArrays, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesEvent, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleBoxesAsyncClassMethod, moduleUsesWebCrypto, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesInspColors, moduleUsesWrapWatch, moduleUsesFnText, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesDynGopd, moduleUsesDynGopdAny, moduleUsesDynProto, moduleUsesPromiseStatics, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleBoxesEmitters, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
+import { moduleBoxesFunctionLikeValues, moduleUsesDestroyDyn, moduleUsesTimersPromisesValue, moduleUsesHttpDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleUsesFrozenArrays, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesEvent, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleBoxesAsyncClassMethod, moduleUsesWebCrypto, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesCollate, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesInspColors, moduleUsesWrapWatch, moduleUsesFnText, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesDynGopd, moduleUsesDynGopdAny, moduleUsesDynProto, moduleUsesPromiseStatics, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleBoxesEmitters, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
   moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, moduleUsesTextMb, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc , moduleBoxesProcStream, procStreamLibWriteFence} from "./ir/nodes.js";
 import { writeModuleFile } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -1014,6 +1014,8 @@ function programNativeFeatures(
     // The link switch for scr_regex.c + libregexp: detected on the IR, so
     // regex-free programs keep the historical (pinned) command line.
     regex: moduleUsesRegex(mod),
+    // The CLDR root collation unit (localeCompare); it rides the regex switch's normalizer.
+    collate: moduleUsesCollate(mod),
     // Array copying methods and the typed-array bridges live in one
     // optional TU, linked only when one of their IR intrinsics survives.
     copying: moduleUsesCopying(mod),
@@ -2586,6 +2588,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
     outPath: archivePath,
     sanitize: opts.sanitize ?? false,
     regex: moduleUsesRegex(mod),
+    collate: moduleUsesCollate(mod),
     assert: moduleUsesAssert(mod),
     inspect: moduleUsesInspect(mod) || moduleUsesHttpDestroyDyn(mod),
     symbol: moduleUsesSymbol(mod),

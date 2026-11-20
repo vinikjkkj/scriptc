@@ -1481,6 +1481,8 @@ ScrStr *scr_str_pad_end(ScrStr *s, double maxLength, ScrStr *fill);
  * isWellFormed is constant true and toWellFormed the identity (per spec
  * both are no-ops on well-formed input). Borrow s; toWellFormed +1. */
 bool scr_str_is_well_formed(ScrStr *s);
+/* String.prototype.localeCompare(that) in the default locale (the CLDR root collation, scr_collate.c): -1, 0 or 1. */
+double scr_str_locale_compare(const ScrStr *a, const ScrStr *b);
 ScrStr *scr_str_to_well_formed(ScrStr *s);
 
 /* RegExp.escape(s) — ES2025 EncodeForRegExpEscape per code point: leading
