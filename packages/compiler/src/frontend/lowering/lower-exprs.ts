@@ -7560,7 +7560,20 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
 }
 
   export function lowerNullishCoalesce(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
-    let left = L.lowerExpr(expr.left);
+    // `(e as C).member ?? d` / `x.member ?? d` over a catch payload (castDynBinding): the checker types the member by the class, so a
+    // member the payload lacks would fail the typed read before the default could answer. The left stays the dyn read, unnarrowed.
+    let lp: ts.Expression = expr.left;
+    while (ts.isParenthesizedExpression(lp)) lp = lp.expression;
+    let left: IrExpr;
+    if (ts.isPropertyAccessExpression(lp) && !lp.questionDotToken && catchCastDynRecv(L, lp.expression)) {
+      const castId = ts.isIdentifier(lp.expression) ? L.resolveLocal(lp.expression) : null;
+      const crecv: IrExpr = castId !== null ? { kind: "varRef", localId: castId.id, type: DYN, loc: locOf(lp.expression) } : L.lowerExpr(lp.expression);
+      left = crecv.type.kind === "dyn"
+        ? { kind: "dynKeyGet", key: { kind: "strLit", value: lp.name.text, type: STRING, loc: locOf(lp.name) }, value: crecv, type: DYN, loc: locOf(lp) }
+        : L.lowerExpr(expr.left);
+    } else {
+      left = L.lowerExpr(expr.left);
+    }
     {
       // A pointer-backed field (`cache!: Map<..>`): the presence bool picks
       // the field's value or the default (lower-absent.ts nullableFieldRead).
