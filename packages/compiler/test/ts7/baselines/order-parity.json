@@ -17593,6 +17593,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26132-throw-null-and-throw-undefined-reach-the-catch-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26132-throw-null-and-throw-undefined-reach-the-catch-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26133-an-uncaught-throw-null-exits-one-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26133-an-uncaught-throw-null-exits-one-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2614-trap-binding-later-writes.ts": {
    "order": [
     "<repo>/tests/corpus/2614-trap-binding-later-writes.ts"
