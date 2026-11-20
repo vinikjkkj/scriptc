@@ -10624,6 +10624,9 @@ ScrDyn *scr_strdec_obj_invoke(ScrDyn *recv, const char *method, ScrDyn *const *a
 ScrDyn *scr_strdec_obj_last(ScrDyn *recv, const char *key);
 ScrDyn *scr_arrlike_from(const ScrDyn *v);
 ScrDyn *scr_arrlike_from_read(const ScrDyn *v);
+/* Installed by scr_regex.c: the dyn String arm of split/replace/replaceAll/search/normalize/codePointAt/isWellFormed/toWellFormed/toLocale*Case.
+ * Clears *handled for an argument shape it does not run. */
+extern ScrDyn *(*scr_dyn_str_ext_hook)(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, bool *handled);
 void scr_strdec_state_info(const ScrStr *enc, double pending, size_t *need, size_t *total, uint8_t last[4]);
 double scr_strdec_next(const ScrStr *enc, double pending, const ScrBytes *chunk);
 ScrStr *scr_strdec_end(const ScrStr *enc, double pending);

@@ -11131,6 +11131,15 @@ export function moduleUsesRegex(mod: IrModule): boolean {
     }
     // RegExp.escape lives in scr_regex.c too (needing no engine — it
     // keeps the always-linked string TU out of hello-world's size class).
+    // A dyn String method that scr_dyn_str_ext_hook (scr_regex.c) runs: the hook exists only where this unit links.
+    if (kind === "dynInvoke") {
+      const m = (v as { method?: unknown }).method;
+      if (m === "split" || m === "match" || m === "replace" || m === "replaceAll" || m === "search" || m === "normalize" || m === "codePointAt" ||
+          m === "isWellFormed" || m === "toWellFormed" || m === "toLocaleLowerCase" || m === "toLocaleUpperCase") {
+        found = true;
+        return;
+      }
+    }
     // String.prototype as a VALUE: its borrowed toUpperCase/toLowerCase reach the lre case tables through scr_dyn_str_case_hook.
     if (kind === "libCall" && ((v as { fn?: unknown }).fn === "regexp.escape" || (v as { fn?: unknown }).fn === "dyn.primPrototype")) {
       found = true;

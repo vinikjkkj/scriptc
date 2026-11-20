@@ -1723,3 +1723,218 @@ static const ScrDynHandleOps scr_regex_dynh_ops = {
 void scr_regex_dyn_install(void) {
   scr_dyn_handle_install(SCR_DYNH_REGEX, &scr_regex_dynh_ops);
 }
+
+/* ── dyn String methods that need this unit (split / replace / replaceAll / search / normalize / codePointAt / isWellFormed /
+ * toWellFormed / toLocaleLowerCase / toLocaleUpperCase) ──────────────────────────────────────────────────────────────────────
+ * scr_dyn_invoke's String arm calls this hook (installed below, so a program that does not link this unit keeps the loud
+ * "not supported yet" answer instead of a link error). `*handled` is cleared for the argument shapes this does not run
+ * (a function replacer, a string pattern to search, locale arguments): the caller then fences exactly as before. */
+/* The string-pattern replace of scr_copying.c (that unit is gated apart from this one), kept private here. */
+static void dyn_strext_repl_put(char **buf, size_t *len, size_t *cap, const char *p, size_t n) {
+  if (*len + n + 1 > *cap) {
+    size_t nc = *cap ? *cap : 64;
+    while (nc < *len + n + 1) nc *= 2;
+    char *nb = (char *)realloc(*buf, nc);
+    if (!nb) scr_trap("scriptc: out of memory\n");
+    *buf = nb;
+    *cap = nc;
+  }
+  if (n) memcpy(*buf + *len, p, n);
+  *len += n;
+}
+
+static void dyn_strext_repl_substitute(char **buf, size_t *len, size_t *cap, const ScrStr *s, size_t pos,
+                                size_t mlen, const ScrStr *rep) {
+  const char *r = rep->data;
+  size_t rl = rep->len;
+  for (size_t i = 0; i < rl; i++) {
+    if (r[i] == '$' && i + 1 < rl) {
+      char c = r[i + 1];
+      if (c == '$') { dyn_strext_repl_put(buf, len, cap, "$", 1); i++; continue; }
+      if (c == '&') { dyn_strext_repl_put(buf, len, cap, s->data + pos, mlen); i++; continue; }
+      if (c == '`') { dyn_strext_repl_put(buf, len, cap, s->data, pos); i++; continue; }
+      if (c == '\'') { dyn_strext_repl_put(buf, len, cap, s->data + pos + mlen, s->len - pos - mlen); i++; continue; }
+    }
+    dyn_strext_repl_put(buf, len, cap, r + i, 1);
+  }
+}
+
+static ScrStr *dyn_strext_replace_str(ScrStr *s, ScrStr *pat, ScrStr *rep, bool all) {
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  size_t from = 0; /* bytes of s already copied */
+  size_t plen = pat->len;
+  if (plen == 0) {
+    size_t i = 0;
+    for (;;) {
+      dyn_strext_repl_put(&buf, &len, &cap, s->data + from, i - from);
+      from = i;
+      dyn_strext_repl_substitute(&buf, &len, &cap, s, i, 0, rep);
+      if (!all || i >= s->len) break;
+      /* copy one whole code point, then the next boundary */
+      size_t step = 1;
+      unsigned char c = (unsigned char)s->data[i];
+      if (c >= 0xF0) step = 4; else if (c >= 0xE0) step = 3; else if (c >= 0xC0) step = 2;
+      if (i + step > s->len) step = s->len - i;
+      i += step;
+    }
+    dyn_strext_repl_put(&buf, &len, &cap, s->data + from, s->len - from);
+  } else {
+    size_t i = 0;
+    while (i + plen <= s->len) {
+      const char *hit = (const char *)memchr(s->data + i, pat->data[0], s->len - i - plen + 1);
+      if (!hit) break;
+      size_t at = (size_t)(hit - s->data);
+      if (memcmp(s->data + at, pat->data, plen) != 0) { i = at + 1; continue; }
+      dyn_strext_repl_put(&buf, &len, &cap, s->data + from, at - from);
+      dyn_strext_repl_substitute(&buf, &len, &cap, s, at, plen, rep);
+      from = at + plen;
+      i = from;
+      if (!all) break;
+    }
+    dyn_strext_repl_put(&buf, &len, &cap, s->data + from, s->len - from);
+  }
+  ScrStr *out = scr_str_new(buf ? buf : "", len);
+  free(buf);
+  return out;
+}
+
+static ScrDyn *dyn_strext_arr(ScrArr *a) {
+  ScrDyn *d = scr_dyn_new_arr();
+  for (size_t i = 0; i < a->len; i++) {
+    ScrStr *e = (ScrStr *)(uintptr_t)a->data[i];
+    ScrDyn *item = scr_dyn_new_str(e);
+    scr_dyn_arr_push(d, item);
+  }
+  scr_arr_release(a);
+  return d;
+}
+
+static ScrRegex *dyn_strext_regex(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_HANDLE && d->v.handle.tag == SCR_DYNH_REGEX ? (ScrRegex *)d->v.handle.ptr : NULL;
+}
+
+static ScrDyn *dyn_strext_str(ScrStr *r) {
+  if (r == NULL) return NULL;
+  ScrDyn *d = scr_dyn_new_str(r);
+  scr_str_release(r);
+  return d;
+}
+
+static bool dyn_strext_is(const char *m, const char *n) { return strcmp(m, n) == 0; }
+
+static ScrDyn *scr_dyn_str_ext_method(ScrDyn *recv, const char *m, ScrDyn *const *args, size_t argc, bool *handled) {
+  *handled = true;
+  ScrStr *s = (ScrStr *)recv->v.str;
+  const ScrDyn *a0 = argc > 0 ? args[0] : NULL;
+  const ScrDyn *a1 = argc > 1 ? args[1] : NULL;
+  const bool u0 = a0 == NULL || a0->kind == SCR_DYN_UNDEF;
+  if (dyn_strext_is(m, "isWellFormed")) return scr_dyn_new_bool(scr_str_is_well_formed(s));
+  if (dyn_strext_is(m, "toWellFormed")) return dyn_strext_str(scr_str_to_well_formed(s));
+  if (dyn_strext_is(m, "toLocaleLowerCase") || dyn_strext_is(m, "toLocaleUpperCase")) {
+    if (!u0) { *handled = false; return NULL; } /* a locale argument needs ICU's language-sensitive mappings */
+    return dyn_strext_str(dyn_strext_is(m, "toLocaleLowerCase") ? scr_str_to_lower(s) : scr_str_to_upper(s));
+  }
+  if (dyn_strext_is(m, "normalize")) {
+    ScrStr *form = NULL;
+    if (u0) form = scr_str_new("NFC", 3);
+    else form = scr_dyn_string_coerce(a0);
+    if (form == NULL) return NULL;
+    ScrStr *r = scr_str_normalize(s, form);
+    scr_str_release(form);
+    return scr_exc_pending() ? (r != NULL ? (scr_str_release(r), NULL) : NULL) : dyn_strext_str(r);
+  }
+  if (dyn_strext_is(m, "codePointAt")) {
+    double pos = scr_dyn_index_arg(args, argc, 0, 0, "codePointAt");
+    if (scr_exc_pending()) return NULL;
+    double len = scr_str_utf16_len(s);
+    if (!(pos >= 0 && pos < len)) return scr_dyn_undefined();
+    double cu = scr_str_char_code_at(s, pos);
+    if (cu >= 0xD800 && cu <= 0xDBFF && pos + 1 < len) {
+      double lo = scr_str_char_code_at(s, pos + 1);
+      if (lo >= 0xDC00 && lo <= 0xDFFF) return scr_dyn_new_num((cu - 0xD800) * 1024 + (lo - 0xDC00) + 0x10000);
+    }
+    return scr_dyn_new_num(cu);
+  }
+  if (dyn_strext_is(m, "match")) {
+    /* Only the GLOBAL form: Node answers a plain array of the whole matches (or null). The non-global result carries index / input /
+     * groups and undefined for non-participating captures, none of which the runtime's match rows hold, so it keeps the fence. */
+    ScrRegex *re = dyn_strext_regex(a0);
+    if (re == NULL) { *handled = false; return NULL; }
+    ScrStr *fl = scr_regex_flags(re);
+    bool g = fl != NULL && memchr(fl->data, 'g', fl->len) != NULL;
+    if (fl != NULL) scr_str_release(fl);
+    if (!g) { *handled = false; return NULL; }
+    ScrArr *rows = scr_regex_match_all(s, re);
+    if (rows == NULL) return NULL;
+    ScrDyn *d = scr_dyn_new_arr();
+    for (size_t i = 0; i < rows->len; i++) {
+      ScrArr *row = (ScrArr *)(uintptr_t)rows->data[i];
+      if (row->len > 0) scr_dyn_arr_push(d, scr_dyn_new_str((ScrStr *)(uintptr_t)row->data[0]));
+    }
+    size_t n = d->v.arr.len;
+    scr_arr_release(rows);
+    if (n == 0) { scr_dyn_release(d); return scr_dyn_new_null(); }
+    return d;
+  }
+  if (dyn_strext_is(m, "search")) {
+    ScrRegex *re = dyn_strext_regex(a0);
+    if (re == NULL) { *handled = false; return NULL; }
+    return scr_dyn_new_num(scr_regex_search(s, re));
+  }
+  if (dyn_strext_is(m, "split")) {
+    double limit = 4294967295.0;
+    if (a1 != NULL && a1->kind != SCR_DYN_UNDEF) {
+      double n = scr_dyn_to_number(a1);
+      n = isnan(n) || isinf(n) ? (isinf(n) && n > 0 ? 4294967295.0 : 0) : trunc(n);
+      limit = fmod(n < 0 ? n + 4294967296.0 * ceil(-n / 4294967296.0) : n, 4294967296.0);
+    }
+    ScrArr *parts;
+    if (u0) {
+      ScrDyn *d = scr_dyn_new_arr();
+      scr_dyn_arr_push(d, scr_dyn_retain(recv));
+      if (limit < 1) { scr_dyn_release(d); return scr_dyn_new_arr(); }
+      return d;
+    }
+    ScrRegex *re = dyn_strext_regex(a0);
+    if (re != NULL) {
+      parts = scr_regex_split(s, re);
+    } else {
+      ScrStr *sep = scr_dyn_string_coerce(a0);
+      if (sep == NULL) return NULL;
+      parts = scr_str_split(s, sep);
+      scr_str_release(sep);
+    }
+    if (parts == NULL) return NULL;
+    ScrDyn *d = dyn_strext_arr(parts);
+    if (limit < (double)d->v.arr.len) {
+      ScrDyn *cut = scr_dyn_new_arr();
+      for (size_t i = 0; i < (size_t)limit; i++) scr_dyn_arr_push(cut, scr_dyn_retain(d->v.arr.items[i]));
+      scr_dyn_release(d);
+      return cut;
+    }
+    return d;
+  }
+  if (dyn_strext_is(m, "replace") || dyn_strext_is(m, "replaceAll")) {
+    const bool all = dyn_strext_is(m, "replaceAll");
+    if (a1 != NULL && a1->kind == SCR_DYN_FUNC) { *handled = false; return NULL; } /* a replacer function: per-match calls */
+    ScrStr *rep = scr_dyn_string_coerce(a1 != NULL ? a1 : scr_dyn_undefined());
+    if (rep == NULL) return NULL;
+    ScrRegex *re = dyn_strext_regex(a0);
+    ScrStr *r;
+    if (re != NULL) {
+      r = all ? scr_regex_replace_all(s, re, rep) : scr_regex_replace(s, re, rep);
+    } else {
+      ScrStr *pat = scr_dyn_string_coerce(a0 != NULL ? a0 : scr_dyn_undefined());
+      if (pat == NULL) { scr_str_release(rep); return NULL; }
+      r = dyn_strext_replace_str(s, pat, rep, all);
+      scr_str_release(pat);
+    }
+    scr_str_release(rep);
+    if (scr_exc_pending()) { if (r != NULL) scr_str_release(r); return NULL; }
+    return dyn_strext_str(r);
+  }
+  *handled = false;
+  return NULL;
+}
+__attribute__((constructor)) static void scr_regex_install_strext_hook(void) { scr_dyn_str_ext_hook = scr_dyn_str_ext_method; }

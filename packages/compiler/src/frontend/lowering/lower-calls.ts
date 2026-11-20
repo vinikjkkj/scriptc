@@ -7745,6 +7745,13 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       }
       return null;
     }
+    // A checker-`any` receiver whose LOWERED value is a static array, number or boolean (the result of a dyn string method that lowered
+    // statically, `s.split(",").join("|")`): box it and take the same runtime dispatch a dyn value takes.
+    if (recv.type.kind !== "dyn" && (recvTs.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 &&
+        (recv.type.kind === "array" || recv.type.kind === "f64" || recv.type.kind === "bool" || recv.type.kind === "union") && L.dynConvertible(recv.type)) {
+      const boxed = L.coerceToExpected(recv, DYN);
+      if (boxed.type.kind === "dyn") recv = boxed;
+    }
     if (recv.type.kind !== "dyn") return null;
     // Typed-destination filter first (validated extraction into a real
     // T[]); an untyped destination falls through to the runtime dispatch
@@ -8357,6 +8364,9 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // Its siblings: the exact-value formatters (scr_num_to_exponential_digits,
   // scr_num_to_precision) behind the same dispatch.
   "toExponential", "toPrecision",
+  // String.prototype names the dyn String arm now runs through scr_dyn_str_ext_hook (scr_regex.c): the dot spelling reaches it instead of
+  // refusing by name.
+  "isWellFormed", "toWellFormed", "toLocaleLowerCase", "toLocaleUpperCase",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
   // boxed through the checked-dynamic boundary): these names dispatch on
   // the runtime kind so a boxed IncomingMessage/ServerResponse/Socket
