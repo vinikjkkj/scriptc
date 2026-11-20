@@ -18216,6 +18216,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26520-bigint-literals-and-number-conversion-edge-values-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26520-bigint-literals-and-number-conversion-edge-values-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26521-a-checked-integer-range-chain-over-small-bigints-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26521-a-checked-integer-range-chain-over-small-bigints-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2652-top-level-await-dynamic/main.ts": {
    "order": [
     "<repo>/tests/corpus/2652-top-level-await-dynamic/main.ts"
