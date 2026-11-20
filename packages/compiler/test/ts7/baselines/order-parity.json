@@ -17785,6 +17785,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26141-engine-values-print-like-node-through-the-static-console-and-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/26141-engine-values-print-like-node-through-the-static-console-and-inspect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26142-the-engine-console-prints-like-node-inside-new-function-text.ts": {
+   "order": [
+    "<repo>/tests/corpus/26142-the-engine-console-prints-like-node-inside-new-function-text.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2615-nullish-field-record-binding.ts": {
    "order": [
     "<repo>/tests/corpus/2615-nullish-field-record-binding.ts"
