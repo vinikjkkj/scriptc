@@ -7492,6 +7492,18 @@ function contextualAdmitsUnit(L: Lowerer, expr: ts.Expression, unit: IrType): bo
   return parts.some((p) => (p.flags & (unitFlags | openFlags)) !== 0);
 }
 
+/** `(a ?? null) === null`: the value only meets an equality test against a unit literal, so it never needs a declared slot to hold the default. */
+function comparedWithUnit(expr: ts.Expression): boolean {
+  let n: ts.Node = expr;
+  while (n.parent && ts.isParenthesizedExpression(n.parent)) n = n.parent;
+  const p = n.parent;
+  if (p === undefined || !ts.isBinaryExpression(p)) return false;
+  const k = p.operatorToken.kind;
+  if (k !== ts.SyntaxKind.EqualsEqualsEqualsToken && k !== ts.SyntaxKind.ExclamationEqualsEqualsToken &&
+      k !== ts.SyntaxKind.EqualsEqualsToken && k !== ts.SyntaxKind.ExclamationEqualsToken) return false;
+  return unitLiteralDefaultOf(p.left === n ? p.right : p.left) !== null;
+}
+
 /** Is this expression's value tested for nullish by the operator that
  * consumes it — i.e. is it the LEFT operand of an enclosing `??`
  * (parentheses tolerated)? Deliberately syntactic and deliberately
@@ -7769,6 +7781,66 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
           loc,
         };
       }
+      // `list[i] ?? null` / `?? "d"` over a number element: tsc types the `??` as `number` (a never-nullish left), so the default
+      // used to be dropped silently on a miss. The honest type is `number | default`. A destination that admits it gets the exact
+      // value; one that cannot (a `number`-typed return or local) cannot hold the default, so a miss takes the stranded-value
+      // TypeError instead of answering `undefined` where Node answers the default. `?? undefined` IS the marker already.
+      const dUnit = unitLiteralDefaultOf(expr.right);
+      let leftSyn: ts.Expression = expr.left;
+      while (ts.isParenthesizedExpression(leftSyn) || ts.isNonNullExpression(leftSyn)) leftSyn = leftSyn.expression;
+      if (ts.isElementAccessExpression(leftSyn) && (dUnit === null || dUnit.kind === "nullT")) {
+        const rt = rightRaw.type;
+        const rtOk = dUnit !== null || rt.kind === "string" || rt.kind === "bool";
+        if (rtOk) {
+          const tsR = L.typeOf(expr.right).flags;
+          const open = ts.TypeFlags.Any | ts.TypeFlags.Unknown;
+          let admits = dUnit !== null && comparedWithUnit(expr);
+          try {
+            const ctx = L.checker.getContextualType(expr);
+            const parts: readonly ts.Type[] = ctx === undefined ? [] : ctx.isUnionType() ? ts.constituentTypes(ctx) : [ctx];
+            admits = admits || parts.some((p) =>
+              (p.flags & open) !== 0 ||
+              (dUnit !== null ? (p.flags & ts.TypeFlags.Null) !== 0
+                : rt.kind === "string" ? (p.flags & ts.TypeFlags.StringLike) !== 0 && (tsR & ts.TypeFlags.StringLike) !== 0
+                : (p.flags & ts.TypeFlags.BooleanLike) !== 0));
+          } catch {
+            /* keep the syntactic answer */
+          }
+          const h = L.declareHiddenLocal("%numNullish", F64);
+          const held: IrExpr = { kind: "varRef", localId: h.id, type: F64, loc };
+          const isU: IrExpr = { kind: "libCall", fn: "num.isUndef", args: [held], type: BOOL, loc };
+          if (admits) {
+            const honest = dUnit !== null ? L.withUnitArmOf(F64, dUnit) : { kind: "union" as const, unionId: L.unions.intern([F64, rt].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1))) };
+            if (honest !== null) {
+              return {
+                kind: "seqExpr",
+                stmts: [{ kind: "varDecl", localId: h.id, init: left, loc }],
+                result: {
+                  kind: "ternary",
+                  cond: isU,
+                  then: L.coerceToExpected(rightRaw, honest),
+                  else_: L.coerceToExpected(held, honest),
+                  type: honest,
+                  loc,
+                },
+                type: honest,
+                loc,
+              };
+            }
+          } else if (dUnit !== null) {
+            const trap = L.strandedUnitTrap(rightRaw, F64, loc);
+            if (trap !== null) {
+              return {
+                kind: "seqExpr",
+                stmts: [{ kind: "varDecl", localId: h.id, init: left, loc }],
+                result: { kind: "ternary", cond: isU, then: trap, else_: held, type: F64, loc },
+                type: F64,
+                loc,
+              };
+            }
+          }
+        }
+      }
     }
     if (left.type.kind !== "union") return left;
     const def = L.unions.get(left.type.unionId);
@@ -7807,6 +7879,16 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
       type = ctxIr !== null ? ctxIr : rest.length === 1 ? rest[0]! : null;
     }
     if (type === null) type = L.irTypeOf(expr); // unchanged, diagnostic included
+    {
+      // `list[i] ?? null` over a non-nullable element type: the checker types the whole `??` as the element (the left is never nullish to
+      // it), but the read can miss and the `null` default is the answer Node gives. Where the destination admits the unit (console.log's
+      // `unknown` rest element, a `T | null` slot) the honest type is `type | unit`, and the re-tagged shape below carries the default.
+      const litU = unitLiteralDefaultOf(expr.right);
+      if (litU !== null && type.kind !== "union" && rest.length === 1 && typeEquals(type, rest[0]!) && (contextualAdmitsUnit(L, expr, litU) || comparedWithUnit(expr))) {
+        const honest = L.withUnitArmOf(type, litU);
+        if (honest !== null && honest.kind === "union") type = honest;
+      }
+    }
     if (typeEquals(type, left.type) || (rest.length === 1 && typeEquals(type, rest[0]!))) {
       // `event.key.participant ?? event.rawNode.attrs.participant ??
       // event.key.remoteJid` (zapo mailbox.ts:99). The MIDDLE operand is
