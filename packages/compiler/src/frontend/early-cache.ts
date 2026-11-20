@@ -534,6 +534,20 @@ export async function readEarlyBuildCache(
   return hit;
 }
 
+/* ── emitted-output ledger ───────────────────────────────────────────────
+ *
+ * Two builds that share an output directory write the SAME paths (`<outDir>/<stem>.c`): a build that publishes reads those paths back
+ * some time after it wrote them, and the other build may be truncating or rewriting them right then. The copy then described a file
+ * this build never produced (a half-written unit, with no main), and its digest, taken from the copy, made the entry look sound. A
+ * build now records the digest of every unit it writes and publishes only bytes that still match it. */
+const emittedDigests = new Map<string, string>();
+
+/** writeFile for a unit the build emits and may publish: remembers what this process wrote. */
+export async function writeEmitted(path: string, text: string): Promise<void> {
+  await writeFile(path, text);
+  emittedDigests.set(resolve(path), digestBytes(Buffer.from(text, "utf8")));
+}
+
 /* ── publish ─────────────────────────────────────────────────────────────── */
 
 export async function publishEarlyBuildCache(
@@ -561,10 +575,14 @@ export async function publishEarlyBuildCache(
       const target = join(stage, source.name);
       await copyFile(source.path, target);
       await chmod(target, 0o600).catch(() => undefined);
+      const digest = digestBytes(await readFile(target));
+      // Not what this build wrote (another build in the same directory got there first): no entry.
+      const wrote = emittedDigests.get(resolve(source.path));
+      if (wrote !== undefined && wrote !== digest) return;
       artifacts.push({
         name: source.name,
         rel: relative(resolve(options.outDir), resolve(source.path)).replaceAll("\\", "/"),
-        digest: digestBytes(await readFile(target)),
+        digest,
       });
     }
     // Re-validate AFTER copying: an input that changed while we were staging
