@@ -7,6 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
+import { catchCastDynRecv } from "./lower-exprs.js";
 import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrParam, IrStmt, IrStrIntrinsicMethod, IrType, KEYOBJ, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, typeEquals, UNDEFINED_T, } from "../../ir/nodes.js";
 import { STR_INTRINSIC_SIGS } from "../../ir/validate.js";
 import { definePropTableDecline } from "./lower-classes.js";
@@ -1854,7 +1855,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // read answers whatever the thrown value has, like the erased cast in Node.
     let castRecv: ts.Expression = recv;
     while (ts.isParenthesizedExpression(castRecv)) castRecv = castRecv.expression;
-    if (ts.isAssertionExpression(castRecv) && L.caughtLocalOf((castRecv as ts.AsExpression).expression) !== null) return;
+    if (catchCastDynRecv(L, castRecv)) return;
     // Name the container the way the source reads: the global's name when
     // the receiver IS a stdlib global (Math, process), the dotted path for
     // a member of one (process.stdout — its TYPE text would be the useless

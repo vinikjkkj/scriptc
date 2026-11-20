@@ -3109,6 +3109,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (whole !== null) return whole;
     }
     if (ts.isPropertyAccessExpression(expr)) {
+      // `(e as C).member` over a catch binding whose cast lowers to the payload's dyn value: the dyn keyed read (a lib-declared
+      // member such as `.message` included), whatever the thrown value is.
+      if (!expr.questionDotToken && catchCastDynRecv(L, expr.expression)) {
+        const castId = ts.isIdentifier(expr.expression) ? L.resolveLocal(expr.expression) : null;
+        const recv: IrExpr = castId !== null ? { kind: "varRef", localId: castId.id, type: DYN, loc: locOf(expr.expression) } : L.lowerExpr(expr.expression);
+        if (recv.type.kind === "dyn") {
+          const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
+          return L.maybeNarrow({ kind: "dynKeyGet", key, value: recv, type: DYN, loc: locOf(expr) }, expr);
+        }
+      }
       // `Object.getPrototypeOf(x).constructor` where x's class family rebinds `constructor`: the instance's own `.constructor` read.
       if (expr.name.text === "constructor" && expr.questionDotToken === undefined && protoCtorReceiver(L, expr) !== null) {
         const viaProto = lowerInstanceConstructorRead(L, expr);
@@ -3489,15 +3499,6 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (!expr.questionDotToken) {
         const lb = liveRecvBagOf(L, expr.expression, locOf(expr));
         if (lb !== null) return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr) }, optional: true, value: lb, type: DYN, loc: locOf(expr) };
-      }
-      // `(e as C).member` over a catch binding whose cast lowers to the payload's dyn value: the dyn keyed read (a lib-declared
-      // member such as `.message` included), whatever the thrown value is.
-      if (!expr.questionDotToken && catchCastDynRecv(L, expr.expression)) {
-        const recv = L.lowerExpr(expr.expression);
-        if (recv.type.kind === "dyn") {
-          const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
-          return L.maybeNarrow({ kind: "dynKeyGet", key, value: recv, type: DYN, loc: locOf(expr) }, expr);
-        }
       }
       if (!expr.questionDotToken && ((L.cjsLocalModuleBindingOf(expr.expression) && jsonRequireTypeOverride(L, expr.expression) === null) || L.cjsWholeClassRequireDepOf(expr.expression) !== null || L.cjsSingleValueMemberOf(expr.expression, expr.name.text))) {
         // A binding whose dep is a class-expression WHOLE export
@@ -18347,11 +18348,55 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
     }
   }
 
+const castDynLocals = new WeakMap<Lowerer, Set<string>>();
+export function markCastDynLocal(L: Lowerer, id: string): void {
+  let set = castDynLocals.get(L);
+  if (set === undefined) castDynLocals.set(L, (set = new Set()));
+  set.add(id);
+}
+
+/** Does the declaration `const x = e as C` (e a catch binding, C a boxable hierarchy class) qualify to hold the payload's dyn value? Every
+   * reference to x must be the receiver of a member read or call, so a payload that is no C answers like the erased cast in Node. */
+export function castDynBinding(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+  if (!ts.isIdentifier(decl.name) || decl.initializer === undefined || (decl.parent.flags & ts.NodeFlags.Const) === 0) return false;
+  if (!ts.isAssertionExpression(unparenExpr(decl.initializer)) || !catchCastDynRecv(L, decl.initializer)) return false;
+  const sym = L.checker.getSymbolAtLocation(decl.name);
+  if (sym === undefined) return false;
+  let ok = true;
+  const scope = decl.parent.parent.parent; // declaration list -> statement -> enclosing block
+  const visit = (n: ts.Node): void => {
+    if (!ok) return;
+    if (ts.isIdentifier(n) && n !== decl.name && L.checker.getSymbolAtLocation(n) === sym) {
+      const par = n.parent;
+      const recv = ts.isPropertyAccessExpression(par) && par.expression === n && !par.questionDotToken;
+      const written = recv && ((ts.isBinaryExpression(par.parent) && par.parent.left === par && par.parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && par.parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
+        ((ts.isPrefixUnaryExpression(par.parent) || ts.isPostfixUnaryExpression(par.parent)) && (par.parent.operator === ts.SyntaxKind.PlusPlusToken || par.parent.operator === ts.SyntaxKind.MinusMinusToken)) ||
+        ts.isDeleteExpression(par.parent));
+      // A method call keeps the checked cast: the call lowering reads the receiver through the class type.
+      const called = recv && ts.isCallExpression(par.parent) && par.parent.expression === par;
+      if (!recv || written || called) ok = false;
+      return;
+    }
+    ts.forEachChild(n, (c) => { visit(c); return undefined; });
+  };
+  visit(scope);
+  return ok;
+}
+function unparenExpr(e: ts.Expression): ts.Expression {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  return e;
+}
+
 /** Is `node` (parentheses stripped) `e as C` over a catch binding, with C a boxable hierarchy class? lowerAsExpression lowers such a cast, as a
    * member receiver, to the payload's dyn value. */
   export function catchCastDynRecv(L: Lowerer, node: ts.Expression): boolean {
     let n: ts.Expression = node;
     while (ts.isParenthesizedExpression(n)) n = n.expression;
+    // A const bound to such a cast (castDynBinding) holds the payload's dyn value; its member reads are the same dyn reads.
+    if (ts.isIdentifier(n)) {
+      const l = L.resolveLocal(n);
+      return l !== null && (castDynLocals.get(L)?.has(l.id) ?? false);
+    }
     if (!ts.isAssertionExpression(n) || L.caughtLocalOf((n as ts.AsExpression).expression) === null) return false;
     const target = L.mapTypeOf(L.checker.getTypeFromTypeNode((n as ts.AsExpression).type));
     if (target?.kind !== "object") return false;
