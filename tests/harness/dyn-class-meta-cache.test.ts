@@ -1,10 +1,10 @@
 /* The per-class member caches of the dyn class machinery (scr_json.c): scr_dyn_objinst_row_scan finds a class's index through a direct-mapped cache
- * (instead of a walk of the list of built indexes), and scr_dyn_objinst_meta answers the synthesized `%props` and `%dynSet` rows from a per-class
+ * (instead of a walk of the list of built indexes), a (class, key address) hint answers a repeated lookup without the hash probe, and scr_dyn_objinst_meta answers the synthesized `%props` and `%dynSet` rows from a per-class
  * cache. Row 26480 (100 classes, half of them EventEmitter-rooted, with different member layouts, called by computed name, written through untyped
  * receivers, a key naming a method shadowing it) must match Node on both backends, plain and sanitized, and -DSCR_OBJ_NOIDX (the pure scans) too.
  *
  * THE CONTROLS THAT FIRE (-DSCR_OBJ_PLANT_BUG=<n>): 11 makes a hit of the index cache answer with the first class's index, unchecked; 12 makes the meta
- * cache answer the other synthesized row. A row that does not move under its plant never reached the mechanism. */
+ * cache answer the other synthesized row; 13 makes the (class, key address) hint answer without comparing the name. A row that does not move under its plant never reached the mechanism. */
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -69,7 +69,7 @@ describe.each(["c", "llvm"] as const)("the class member caches (%s)", (backend) 
       expect(r.stdout).toBe(nodeOut[id]);
     }
   }, 900_000);
-  test.each([["26480", 11], ["26480", 12]] as const)("CONTROL: row %s under planted defect %i differs from Node", async (id, n) => {
+  test.each([["26480", 11], ["26480", 12], ["26480", 13]] as const)("CONTROL: row %s under planted defect %i differs from Node", async (id, n) => {
     const bin = await build(id, `plant${n}-${id}-${backend}`, backend, `-DSCR_OBJ_PLANT_BUG=${n}`, false);
     const r = await run(bin, [], work);
     expect(r.stdout).not.toBe(nodeOut[id]);
