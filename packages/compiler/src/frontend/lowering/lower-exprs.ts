@@ -3490,6 +3490,15 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const lb = liveRecvBagOf(L, expr.expression, locOf(expr));
         if (lb !== null) return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr) }, optional: true, value: lb, type: DYN, loc: locOf(expr) };
       }
+      // `(e as C).member` over a catch binding whose cast lowers to the payload's dyn value: the dyn keyed read (a lib-declared
+      // member such as `.message` included), whatever the thrown value is.
+      if (!expr.questionDotToken && catchCastDynRecv(L, expr.expression)) {
+        const recv = L.lowerExpr(expr.expression);
+        if (recv.type.kind === "dyn") {
+          const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
+          return L.maybeNarrow({ kind: "dynKeyGet", key, value: recv, type: DYN, loc: locOf(expr) }, expr);
+        }
+      }
       if (!expr.questionDotToken && ((L.cjsLocalModuleBindingOf(expr.expression) && jsonRequireTypeOverride(L, expr.expression) === null) || L.cjsWholeClassRequireDepOf(expr.expression) !== null || L.cjsSingleValueMemberOf(expr.expression, expr.name.text))) {
         // A binding whose dep is a class-expression WHOLE export
         // (`module.exports = class {…}`): the member surface is the
@@ -18338,6 +18347,18 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
     }
   }
 
+/** Is `node` (parentheses stripped) `e as C` over a catch binding, with C a boxable hierarchy class? lowerAsExpression lowers such a cast, as a
+   * member receiver, to the payload's dyn value. */
+  export function catchCastDynRecv(L: Lowerer, node: ts.Expression): boolean {
+    let n: ts.Expression = node;
+    while (ts.isParenthesizedExpression(n)) n = n.expression;
+    if (!ts.isAssertionExpression(n) || L.caughtLocalOf((n as ts.AsExpression).expression) === null) return false;
+    const target = L.mapTypeOf(L.checker.getTypeFromTypeNode((n as ts.AsExpression).type));
+    if (target?.kind !== "object") return false;
+    const info = L.classes.get(target.className);
+    return info !== undefined && L.inHierarchy(info) && canBoxClassIntoDyn(target.className);
+  }
+
   export function lowerAsExpression(L: Lowerer, expr: ts.AsExpression | ts.TypeAssertion): IrExpr {
     noteDoubleAssertionDrops(L, expr);
     // `[] as const` — tsgo panics computing the expression's `readonly []`
@@ -18366,6 +18387,19 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       if (target?.kind === "object") {
         const info = L.classes.get(target.className);
         if (info && L.inHierarchy(info)) {
+          // `(e as C).m` / `(e as C).m()`: the cast is erased in Node, so the member answers whatever the thrown value has (undefined for a
+          // string or number payload, the instance's own member for a C). The receiver is the payload's dyn value and the read or call
+          // goes through the dyn path, never a checked extraction that throws a TypeError on a payload of another kind.
+          let up: ts.Node = expr;
+          while (ts.isParenthesizedExpression(up.parent)) up = up.parent;
+          const upParent = up.parent as ts.PropertyAccessExpression;
+          if (
+            ts.isPropertyAccessExpression(upParent) &&
+            upParent.expression === up &&
+            canBoxClassIntoDyn(target.className)
+          ) {
+            return L.lowerExpr(expr.expression);
+          }
           return {
             kind: "caughtCheck",
             value: { kind: "varRef", localId: caughtLocal.id, type: CAUGHT, loc },

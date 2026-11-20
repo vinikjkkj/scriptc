@@ -11212,7 +11212,8 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
  * (the source text would carry the literal arguments). Chains V8 prints as
  * plain names and member reads are rebuilt; any other shape keeps its text. */
 export function v8CallSite(e: ts.Expression): string {
-  if (ts.isParenthesizedExpression(e)) return v8CallSite(e.expression);
+  // The type-only wrappers are erased: V8 runs `(e).m()` and names the callee `e.m`.
+  if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e) || ts.isTypeAssertion(e)) return v8CallSite(e.expression);
   if (ts.isIdentifier(e)) return e.text;
   if (e.kind === ts.SyntaxKind.ThisKeyword) return "this";
   if (ts.isPropertyAccessExpression(e)) return `${v8CallSite(e.expression)}${e.questionDotToken ? "?." : "."}${e.name.text}`;
