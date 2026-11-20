@@ -445,11 +445,13 @@ These are read by the runtime inside every compiled executable (`getenv`), in ad
 | `SCR_TEXT_DROP_FAULT_CHECK_MS` | runtime | tuning knob | How often the fault counter is read, in milliseconds (0 is read as 1). | 8. |
 | `SCR_TEXT_DROP_STAT` | runtime | debug/lab | Print one line with the text residency before and after each drop. | off; an integer or boolean spelling. |
 | `SCR_TICK_POISON` | runtime | debug/lab | A test seam: perturb the microtask tick order on purpose so the turn-order test must go red (the net's own positive control). | off unless set to something other than empty or `0`. |
+| `SCR_WORK_INLINE_US` | runtime | tuning knob | Estimated CPU cost, in microseconds, under which a worker-pool job runs inline at submit instead of paying a thread hand-off (delivery still goes through the poll phase, so nothing observable changes). `0` sends every job to a worker. | a number >= 0; default 20. |
 | `TEMP` | runtime | Node-standard | `os.tmpdir()` on Windows (first choice); third choice on POSIX. Behaves like Node. | see `TMPDIR`. |
 | `TMP` | runtime | Node-standard | `os.tmpdir()`: second choice on POSIX; on Windows second after `TEMP` (then `SystemRoot`/`windir` + `\temp`). Behaves like Node. | see `TMPDIR`. |
 | `TMPDIR` | runtime | Node-standard (POSIX) | `os.tmpdir()` cascade `TMPDIR`, `TMP`, `TEMP`, then `/tmp`, with one trailing slash trimmed. Behaves like Node. | `/tmp`. |
 | `TZ` | runtime | Node-standard | The host time zone for `Date` and `Intl`: a leading `:` is dropped, an empty value is UTC, an IANA id or POSIX-style offset is resolved. Behaves like Node. | the system zone. |
 | `USERPROFILE` | runtime | Node-standard (Windows) | `os.homedir()` on Windows. Behaves like Node. | none (the call traps if unset). |
+| `UV_THREADPOOL_SIZE` | runtime | tuning knob | Size of the worker pool behind the async crypto, zlib, fs and dns forms, with libuv's own parse: unset is 4, `0` is 1, capped at 1024, anything below 1 is read as 1. Workers are created lazily (one per queued job while none is idle), so a program that never submits a job owns no thread. | an integer; default 4. |
 
 ## Compile-time knobs of the runtime (`-D`)
 
