@@ -17420,6 +17420,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25954-promise-reject-with-a-plain-object-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25954-promise-reject-with-a-plain-object-reason-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2596-net-arg-ladders.cjs": {
    "order": [
     "<repo>/tests/corpus/2596-net-arg-ladders.cjs"
