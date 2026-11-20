@@ -52,6 +52,8 @@ export const STR_INTRINSIC_SIGS: Record<
   toWellFormed: { argTypes: [], minArgs: 0, result: STRING },
   localeCompare: { argTypes: [STRING], minArgs: 1, result: F64 },
   normalize: { argTypes: [STRING], minArgs: 1, result: STRING },
+  toLocaleLowerCase: { argTypes: [STRING], minArgs: 1, result: STRING },
+  toLocaleUpperCase: { argTypes: [STRING], minArgs: 1, result: STRING },
   cpAt: { argTypes: [F64], minArgs: 1, result: STRING },
 };
 
