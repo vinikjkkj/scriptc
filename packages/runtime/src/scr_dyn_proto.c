@@ -72,7 +72,7 @@ static bool proto_objectish(const ScrDyn *d) {
 /* `String.prototype` / `Number.prototype` / `Boolean.prototype` as VALUES (which = 0 / 1 / 2), +1: the same immortal sentinel
  * Object.getPrototypeOf("s") answers, so a chain that reaches it is recognised by `instanceof String` and String(v). */
 ScrDyn *scr_dyn_prim_prototype(double which) {
-  unsigned k = which == 0 ? SCR_DYN_STR : which == 1 ? SCR_DYN_NUM : SCR_DYN_BOOL;
+  unsigned k = which == 0 ? SCR_DYN_STR : which == 1 ? SCR_DYN_NUM : which == 2 ? SCR_DYN_BOOL : SCR_DYN_ARR;
   return scr_dyn_retain(scr_dyn_intrinsic_slot(&kind_protos[k]));
 }
 
@@ -430,10 +430,55 @@ ScrDyn *scr_dyn_builtin_ctor_value(double which) {
 
 __attribute__((constructor)) static void scr_dyn_proto_install_ctor_provider(void) { scr_builtin_ctor_provider = scr_dyn_builtin_ctor_value; }
 
+/* The registry's own +1 on each prototype-method function minted by proto_intrinsic_member; released at exit. */
+static struct { char name[24]; ScrDyn *fn; } cache[4][48];
+static void proto_method_cache_teardown(void) {
+  for (int s = 0; s < 4; s++) for (int i = 0; i < 48; i++) { scr_dyn_release(cache[s][i].fn); cache[s][i].fn = NULL; }
+}
+
 /* A member the intrinsic prototype `recv` carries by name, +1, or NULL when `recv` is not an intrinsic prototype or has no such member. */
 static ScrDyn *proto_intrinsic_member(const ScrDyn *recv, const char *key, size_t key_len) {
   if (!proto_is_intrinsic(recv)) return NULL;
 #define SCR_BI_IS(n) (key_len == sizeof(n) - 1 && memcmp(key, n, key_len) == 0)
+  /* The String / Number / Boolean / Array prototype's own methods (`String.prototype.charAt`, `Number.prototype.toString`): the same
+   * receiver-generic function a value of that kind answers for the name (the call reads its receiver from `.call` / `.apply`), so
+   * a borrowed builtin method is the function Node has, not undefined. One immortal function per (prototype, name), so `p.m === p.m`. */
+  if (!(SCR_BI_IS("hasOwnProperty") || SCR_BI_IS("isPrototypeOf") || SCR_BI_IS("propertyIsEnumerable") || SCR_BI_IS("constructor"))) {
+    int slot = recv == kind_protos[SCR_DYN_STR] ? 0 : recv == kind_protos[SCR_DYN_NUM] ? 1 : recv == kind_protos[SCR_DYN_BOOL] ? 2 : recv == kind_protos[SCR_DYN_ARR] ? 3 : -1;
+    if (slot >= 0) {
+      static bool cache_teardown_set = false;
+      if (!cache_teardown_set) {
+        cache_teardown_set = true;
+        scr_atexit(proto_method_cache_teardown);
+      }
+      if (key_len < 24) {
+        for (int i = 0; i < 48; i++) {
+          if (cache[slot][i].fn != NULL && strlen(cache[slot][i].name) == key_len && memcmp(cache[slot][i].name, key, key_len) == 0) return scr_dyn_retain(cache[slot][i].fn);
+        }
+        ScrDyn *sample;
+        if (slot == 0) { ScrStr *e = scr_str_new("", 0); sample = scr_dyn_new_str(e); scr_str_release(e); }
+        else if (slot == 1) sample = scr_dyn_new_num(0);
+        else if (slot == 2) sample = scr_dyn_new_bool(false);
+        else sample = scr_dyn_new_arr();
+        ScrStr *k = scr_str_new(key, key_len);
+        ScrDyn *fn = scr_dyn_intrinsic_method_get(sample, k);
+        scr_str_release(k);
+        scr_dyn_release(sample);
+        if (fn != NULL && fn->kind == SCR_DYN_FUNC) {
+          for (int i = 0; i < 48; i++) {
+            if (cache[slot][i].fn == NULL) {
+              memcpy(cache[slot][i].name, key, key_len);
+              cache[slot][i].name[key_len] = 0;
+              cache[slot][i].fn = scr_dyn_retain(fn); /* immortal registry reference */
+              break;
+            }
+          }
+          return fn;
+        }
+        if (fn != NULL) scr_dyn_release(fn);
+      }
+    }
+  }
   if (SCR_BI_IS("hasOwnProperty")) return scr_builtin_fn(SCR_BI_HASOWN);
   if (SCR_BI_IS("isPrototypeOf")) return scr_builtin_fn(SCR_BI_ISPROTO);
   if (SCR_BI_IS("propertyIsEnumerable")) return scr_builtin_fn(SCR_BI_PROPENUM);
@@ -452,7 +497,6 @@ static ScrDyn *proto_intrinsic_member(const ScrDyn *recv, const char *key, size_
     const ScrDynClass *kc = scr_dyn_class_of_sentinel(recv);
     if (kc != NULL && scr_dyn_class_ops != NULL && scr_dyn_class_ops->class_value_of != NULL) return scr_dyn_class_ops->class_value_of(kc);
   }
-#undef SCR_BI_IS
   return NULL;
 }
 
