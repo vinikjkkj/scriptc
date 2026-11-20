@@ -5896,6 +5896,10 @@ static struct ScrCmIdx {
   uint16_t *slots; /* position + 1, 0 = empty (a table of 65,535 rows or more is never indexed) */
 } scr_cm_idx[SCR_CM_IDX_SLOTS];
 static size_t scr_cm_idx_n = 0;
+/* A direct-mapped cache over scr_cm_idx by descriptor address (a slot holds the index last found for a class that hashes there, checked against
+ * the class on every use). Entries of scr_cm_idx never move or die, so a cached pointer stays valid. */
+#define SCR_CM_IXC_SLOT(c) ((size_t)(((uint64_t)(uintptr_t)(c) * 0x9E3779B97F4A7C15ull) >> 58))
+static const struct ScrCmIdx *scr_cm_ixc[64];
 
 static __attribute__((noinline)) const struct ScrCmIdx *scr_cm_idx_build(const ScrDynClass *c) {
   if (scr_cm_idx_n == SCR_CM_IDX_SLOTS || c->nmembers >= 65535u) return NULL;
@@ -5944,13 +5948,23 @@ static __attribute__((noinline)) const ScrDynClassMember *scr_cm_probe(const Scr
 const ScrDynClassMember *scr_dyn_objinst_row_scan(const ScrDynClass *c, const char *k, size_t klen) {
 #ifndef SCR_OBJ_NOIDX
   if (__builtin_expect(c->nmembers >= SCR_CM_IDX_MIN, 0)) {
-    const struct ScrCmIdx *ix = NULL;
-    for (size_t i = 0; i < scr_cm_idx_n; i++)
-      if (scr_cm_idx[i].cls == c) {
-        ix = &scr_cm_idx[i];
-        break;
-      }
-    if (ix == NULL) ix = scr_cm_idx_build(c);
+    /* The index of `c` comes from a direct-mapped cache of the list below (the walk of up to 64 entries was ~50 Ir of every lookup). */
+    const struct ScrCmIdx **ixc = &scr_cm_ixc[SCR_CM_IXC_SLOT(c)];
+    const struct ScrCmIdx *ix = *ixc;
+    bool stale = ix == NULL || ix->cls != c;
+#ifdef SCR_OBJ_PLANT_BUG
+    if (SCR_OBJ_PLANT_BUG == 11 && ix != NULL) { ix = &scr_cm_idx[0]; stale = false; } /* the planted defect: a cache hit answers with the first class's index, unchecked */
+#endif
+    if (stale) {
+      ix = NULL;
+      for (size_t i = 0; i < scr_cm_idx_n; i++)
+        if (scr_cm_idx[i].cls == c) {
+          ix = &scr_cm_idx[i];
+          break;
+        }
+      if (ix == NULL) ix = scr_cm_idx_build(c);
+      if (ix != NULL) *ixc = ix;
+    }
     if (ix != NULL) return scr_cm_probe(c, ix, k, klen); /* NULL (a full cache) falls through to the walk */
   }
 #endif
