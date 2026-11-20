@@ -916,7 +916,12 @@ ScrStr *scr_str_concat8(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, S
 
 bool scr_str_eq(ScrStr *a, ScrStr *b);
 /* Absent-aware twins (see scr_string.c "ABSENT-AWARE STRING OPERATIONS"): selected per program by IrModule.absentStrings. */
-bool scr_str_eq_u(ScrStr *a, ScrStr *b);
+/* ===/switch over strings in an absent-aware program (IrModule.absentStrings): scr_str_eq (whose body callers inline, and which treats the absent marker as
+ * the text "undefined") plus the identity test that keeps the marker apart from the real string "undefined". Pointer compares run only on equal text. */
+extern const void *const scr_str_absent_sentinel;
+static inline bool scr_str_eq_marker(ScrStr *a, ScrStr *b) {
+  return scr_str_eq(a, b) && ((a == (ScrStr *)scr_str_absent_sentinel) == (b == (ScrStr *)scr_str_absent_sentinel));
+}
 /* The inline form of scr_str_eq_u for the keyed containers (scr_map.c, scr_array.c): equal text, and not the absent marker against the real string "undefined". */
 extern const void *const scr_str_absent_sentinel;
 static inline bool scr_str_eq_k(const ScrStr *a, const ScrStr *b) {

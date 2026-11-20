@@ -1655,7 +1655,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
       const t = E.emitExpr(c.test);
       const cmp =
         c.test.type.kind === "string"
-          ? `${E.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq"}(${disc.name}, ${t.name})`
+          ? (E.mod.absentStrings === true ? `scr_str_eq_marker(${disc.name}, ${t.name})` : `scr_str_eq(${disc.name}, ${t.name})`)
           : `${disc.name} == ${t.name}`;
       const hit = E.newTemp(BOOL, cmp);
       E.releaseFrame(E.frames.pop()!);

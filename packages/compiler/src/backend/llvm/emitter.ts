@@ -5794,6 +5794,20 @@ class LlEmitter {
     return { ...key, name: sel };
   }
 
+  /** ===/switch over strings in an absent-aware module: the equal-text answer `eq` (scr_str_eq) stays true only when both operands are the marker or neither is,
+   * which keeps the absent string apart from the real string "undefined". Two pointer compares; no call. */
+  private markerKeepApart(eq: string, l: string, r: string): string {
+    const B = this.B;
+    this.declare(`@scr_str_absent_sentinel = external constant ptr`);
+    const sent = B.tmp(), la = B.tmp(), ra = B.tmp(), same = B.tmp(), res = B.tmp();
+    B.line(`${sent} = load ptr, ptr @scr_str_absent_sentinel`);
+    B.line(`${la} = icmp eq ptr ${l}, ${sent}`);
+    B.line(`${ra} = icmp eq ptr ${r}, ${sent}`);
+    B.line(`${same} = icmp eq i1 ${la}, ${ra}`);
+    B.line(`${res} = and i1 ${eq}, ${same}`);
+    return res;
+  }
+
   /** A member use of a string receiver in a module that can hold the absent string: Node's TypeError, before the arguments evaluate. One inline
    * pointer compare against the runtime's marker; the pending exception unwinds like a fallible call's. */
   private emitAbsentMemberCheck(recv: string, member: string): void {
@@ -8761,9 +8775,14 @@ class LlEmitter {
       const t = this.emitExpr(c.test);
       const hit = B.tmp();
       if (c.test.type.kind === "string") {
-        const swEq = this.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq";
-        this.declare(`declare zeroext i1 @${swEq}(ptr, ptr)`);
-        B.line(`${hit} = call zeroext i1 @${swEq}(ptr ${disc.name}, ptr ${t.name})`);
+        this.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
+        if (this.mod.absentStrings === true) {
+          const hit0 = B.tmp();
+          B.line(`${hit0} = call zeroext i1 @scr_str_eq(ptr ${disc.name}, ptr ${t.name})`);
+          B.line(`${hit} = and i1 ${hit0}, ${this.markerKeepApart(hit0, disc.name, t.name)}`);
+        } else {
+          B.line(`${hit} = call zeroext i1 @scr_str_eq(ptr ${disc.name}, ptr ${t.name})`);
+        }
       } else if (c.test.type.kind === "bool") {
         B.line(`${hit} = icmp eq i1 ${disc.name}, ${t.name}`);
       } else {
@@ -9208,10 +9227,10 @@ class LlEmitter {
       case "strEq": {
         const l = this.emitBorrowedLocal(e.left, [e.right]);
         const r = this.emitBorrowedLocal(e.right, []);
-        const eqf = this.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq";
-        this.declare(`declare zeroext i1 @${eqf}(ptr, ptr)`);
-        const eq = B.tmp();
-        B.line(`${eq} = call zeroext i1 @${eqf}(ptr ${l.name}, ptr ${r.name})`);
+        this.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
+        const eq0 = B.tmp();
+        B.line(`${eq0} = call zeroext i1 @scr_str_eq(ptr ${l.name}, ptr ${r.name})`);
+        const eq = this.mod.absentStrings === true ? this.markerKeepApart(eq0, l.name, r.name) : eq0;
         if (!e.negated) return { name: eq, type: e.type };
         const t = B.tmp();
         B.line(`${t} = xor i1 ${eq}, true`);
