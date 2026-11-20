@@ -6,7 +6,7 @@
 const v: any = 21;
 const { widthOf } = v; // destructuring an any value stays engine-only (operators over it lower)
 const root = Math.sqrt(81);
-const up = (19.99).toPrecision(3);
+const up = "hello".at(1);
 const parsed = Number.parseFloat("1.5"); // the global's string form is static now; the Number static keeps the island
 const raw = __island_eval("6 * 7");
 const unknownScore: unknown = 81;

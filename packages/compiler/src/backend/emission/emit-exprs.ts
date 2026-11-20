@@ -4752,6 +4752,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_num_to_fixed0(${arg(0)})`);
           case "num.toFixed":
             return finish(`scr_num_to_fixed(${arg(0)}, ${arg(1)})`);
+          case "num.toExponentialDigits":
+            return finish(`scr_num_to_exponential_digits(${arg(0)}, ${arg(1)})`);
+          case "num.toPrecision":
+            return finish(`scr_num_to_precision(${arg(0)}, ${arg(1)})`);
           // Number.prototype.toString(radix) (scr_number.c). +1 string; an
           // out-of-range radix raises the JS RangeError.
           case "num.toStringRadix":
