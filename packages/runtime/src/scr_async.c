@@ -1644,6 +1644,8 @@ ScrStr *scr_promise_payload_str(ScrPromise *p) {
  * fulfilled). */
 int scr_promise_payload_kind(const ScrPromise *p) { return (int)p->payload_kind; }
 bool scr_promise_payload_is_dyn(const ScrPromise *p) { return PV(p)->retain == scr_dyn_retain_v; }
+/* The to-dyn converter a throw site registered for this REF payload's type (scr_exc_todyn_register), or NULL. */
+void *scr_promise_payload_todyn_fn(const ScrPromise *p) { return scr_exc_todyn_find(PV(p)->retain); }
 double scr_promise_payload_num(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_F64); return p->f64; }
 bool scr_promise_payload_flag(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_BOOL); return p->b; }
 void scr_promise_payload_release(const ScrPromise *p, void *v) { PV(p)->release(v); }
