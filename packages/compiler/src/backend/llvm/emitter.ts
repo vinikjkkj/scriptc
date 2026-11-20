@@ -20915,6 +20915,10 @@ class LlEmitter {
     } else {
       args = e.args.map((a) => this.emitExpr(a));
     }
+    // A module that can hold the absent string: s.replace(str, str) on it is Node's TypeError (the receiver is args[0]).
+    if (this.mod.absentStrings === true && e.fn === "string.replaceStr") {
+      this.emitAbsentMemberCheck(args[0]!.name, e.args[3]?.kind === "boolLit" && e.args[3].value ? "replaceAll" : "replace");
+    }
     // The frame stops owning an argument the runtime keeps (see
     // LIB_FN_MOVE_ARGS) — before the call, like the C tier's E.moveTemp.
     for (const i of LIB_FN_MOVE_ARGS[e.fn] ?? []) this.moveTemp(args[i]!);
