@@ -1642,6 +1642,10 @@ ScrStr *scr_insp_buffer(ScrBytes *b) {
  * items" tail (Node's formatList, which treats typed arrays as array
  * extras). `name` is the constructor's name, spelled by the compiler. */
 ScrStr *scr_insp_typed(ScrBytes *b, ScrStr *name) {
+  /* One representation serves Buffer and Uint8Array and the static type only names the SLOT: a Buffer passed through a
+   * Uint8Array-typed parameter is still a Buffer to Node's inspect (`<Buffer ..>`). The value's own flavor stamp decides;
+   * an unstamped value keeps the static form. */
+  if (b->elem == SCR_BYTES_U8 && b->flavor == SCR_BF_BUFFER) return scr_insp_buffer(b);
   const size_t n = b->len;
   InspBuf head = {0};
   ib_str(&head, name);
