@@ -16219,6 +16219,30 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
     "forEach", "keys", "values", "entries", "toString",
   ]);
 
+  /** False only when `e` provably names a function that cannot read the receiver it is called with: a function declaration, function
+   * expression or arrow function (directly or through a const binding) whose text holds no `this`. Everything else (methods, parameters of
+   * function type, imported or computed values) may. */
+  function fnValueMayReadThis(L: Lowerer, e: ts.Expression): boolean {
+    let x: ts.Expression = e;
+    while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+    if (ts.isArrowFunction(x)) return false;
+    if (ts.isFunctionExpression(x)) return x.getText().includes("this");
+    if (!ts.isIdentifier(x)) return true;
+    const sym = L.resolveValueSymbol(x) ?? L.checker.getSymbolAtLocation(x);
+    if (sym === undefined || sym === null) return true;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length !== 1) return true;
+    const d = decls[0]!;
+    if (ts.isFunctionDeclaration(d)) return d.getText().includes("this");
+    if (ts.isVariableDeclaration(d) && d.initializer !== undefined && (ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const) !== 0) {
+      let i: ts.Expression = d.initializer;
+      while (ts.isParenthesizedExpression(i)) i = i.expression;
+      if (ts.isArrowFunction(i)) return false;
+      if (ts.isFunctionExpression(i)) return i.getText().includes("this");
+    }
+    return true;
+  }
+
   /** `Array.prototype.<m>` written as a member access (the stdlib's), or null: the method name. */
   function arrayProtoMemberName(L: Lowerer, e: ts.Expression): string | null {
     let x: ts.Expression = e;
@@ -16845,6 +16869,9 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
           /PropertyDescriptor/.test(L.checker.typeToString(L.typeOf(e.expression)));
       })();
       const callApplyIsJs = isJsSourceFile(call.getSourceFile()) || descriptorAccessorFn;
+      // A TypeScript function value that MAY read `this` (an object-literal or class method read as a value, a parameter of function type, a
+      // `this:`-typed function) needs the receiver window exactly as a JavaScript one does; dropping the receiver answered a throw or a wrong value.
+      const thisWindow = callApplyIsJs || ((name === "call" || name === "apply") && fnValueMayReadThis(L, access.expression));
       if (
         (name === "call" || name === "apply") &&
         L.checker.getCallSignatures(recvT).length > 0 &&
@@ -16901,7 +16928,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
                 locOf(call),
                 call,
               );
-            if (!callApplyIsJs) {
+            if (!thisWindow) {
               // TypeScript: the receiver is dropped, so the call is the
               // call. `droppableStatic` is the `f.call(null, ...)` /
               // `f.call(undefined, ...)` spelling that needs nowhere to
