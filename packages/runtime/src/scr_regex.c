@@ -1032,6 +1032,315 @@ static ScrStr *scr_str_case_conv(const ScrStr *s, int to_lower) {
 
 ScrStr *scr_str_to_lower(const ScrStr *s) { return scr_str_case_conv(s, 1); }
 ScrStr *scr_str_to_upper(const ScrStr *s) { return scr_str_case_conv(s, 0); }
+/* ── toLocaleLowerCase / toLocaleUpperCase with a locale ──────────────────────────────────────────────────────────────────────
+ * Node (ICU) maps case per language only for tr and az (lower and upper), lt (lower, and the dot removal of upper) and el
+ * (upper); every other well-formed tag maps like the root. A tag that is not structurally valid throws Node's RangeError. */
+#include "scr_ccc_data.h"
+
+static int scr_ccc_of(uint32_t cp) {
+  if (cp < 0x300) return 0;
+  long lo = 0, hi = SCR_COLL_NCCC - 1, best = -1;
+  while (lo <= hi) {
+    long mid = (lo + hi) >> 1;
+    if (scr_coll_ccc_start[mid] <= cp) { best = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return best >= 0 && cp <= scr_coll_ccc_end[best] ? scr_coll_ccc_val[best] : 0;
+}
+static bool scr_soft_dotted(uint32_t cp) {
+  for (long i = 0; i < SCR_COLL_NSD; i++) if (cp >= scr_coll_sd_start[i] && cp <= scr_coll_sd_end[i]) return true;
+  return false;
+}
+static bool scr_loc_alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+static bool scr_loc_digit(char c) { return c >= '0' && c <= '9'; }
+static bool scr_loc_alnum(char c) { return scr_loc_alpha(c) || scr_loc_digit(c); }
+
+/* The language class of one BCP 47 tag: 0 root, 1 tr/az, 2 lt, 3 el; -1 when the tag is not structurally valid
+ * (ECMA-402 IsStructurallyValidLanguageTag). */
+static int scr_case_locale_class(const char *t, size_t n) {
+  /* -1: V8's own structure check fails ("Incorrect locale information provided"); -2: it passes and ICU's strict parse fails
+   * ("Invalid language tag: <tag>"): a trailing hyphen, a repeated variant or singleton, a singleton with no value. */
+  size_t st[40], ln[40];
+  int cnt = 0;
+  size_t b = 0;
+  bool trailing = false;
+  if (n == 0) return -1;
+  for (size_t i = 0; i <= n; i++) {
+    if (i == n || t[i] == '-') {
+      if (i == b) { if (i == n && cnt > 0) { trailing = true; break; } return -1; }
+      if (i - b > 8 || cnt >= 40) return -1;
+      st[cnt] = b; ln[cnt] = i - b; cnt++;
+      b = i + 1;
+    } else if (!scr_loc_alnum(t[i])) {
+      return -1;
+    }
+  }
+  const int bad = trailing ? -2 : 0;
+  size_t l0 = ln[0];
+  if (!((l0 >= 2 && l0 <= 3) || (l0 >= 5 && l0 <= 8))) return -1;
+  for (size_t k = 0; k < l0; k++) if (!scr_loc_alpha(t[st[0] + k])) return -1;
+  char lang[9];
+  for (size_t k = 0; k < l0; k++) lang[k] = (char)(t[st[0] + k] | 0x20);
+  lang[l0] = 0;
+  int idx = 1;
+  if (idx < cnt && ln[idx] == 4) {
+    bool ok = true;
+    for (int k = 0; k < 4; k++) if (!scr_loc_alpha(t[st[idx] + k])) ok = false;
+    if (ok) idx++;
+  }
+  if (idx < cnt && ((ln[idx] == 2 && scr_loc_alpha(t[st[idx]]) && scr_loc_alpha(t[st[idx] + 1])) ||
+                    (ln[idx] == 3 && scr_loc_digit(t[st[idx]]) && scr_loc_digit(t[st[idx] + 1]) && scr_loc_digit(t[st[idx] + 2])))) idx++;
+  int nv = 0, dup = 0;
+  size_t vs[40], vl[40];
+  while (idx < cnt && ((ln[idx] >= 5 && ln[idx] <= 8) || (ln[idx] == 4 && scr_loc_digit(t[st[idx]])))) {
+    for (int k = 0; k < nv; k++)
+      if (vl[k] == ln[idx]) {
+        bool same = true;
+        for (size_t q = 0; q < vl[k]; q++) if ((t[vs[k] + q] | 0x20) != (t[st[idx] + q] | 0x20)) same = false;
+        if (same) dup = -2;
+      }
+    vs[nv] = st[idx]; vl[nv] = ln[idx]; nv++;
+    idx++;
+  }
+  int ext = 0;
+  char seen[40];
+  int nseen = 0;
+  while (idx < cnt) {
+    if (ln[idx] != 1) return -1;
+    char sg = (char)(t[st[idx]] | 0x20);
+    if (sg == 'x') {
+      if (idx + 1 >= cnt) ext = -2;
+      idx = cnt;
+      break;
+    }
+    for (int k = 0; k < nseen; k++) if (seen[k] == sg) ext = -2;
+    seen[nseen++] = sg;
+    idx++;
+    int have = 0;
+    while (idx < cnt && ln[idx] >= 2) { idx++; have++; }
+    if (have == 0) ext = -2;
+  }
+  if (bad || dup || ext) return -2;
+  if (strcmp(lang, "tr") == 0 || strcmp(lang, "az") == 0 || strcmp(lang, "tur") == 0 || strcmp(lang, "aze") == 0) return 1;
+  if (strcmp(lang, "lt") == 0 || strcmp(lang, "lit") == 0) return 2;
+  if (strcmp(lang, "el") == 0 || strcmp(lang, "ell") == 0) return 3;
+  return 0;
+}
+
+static void scr_loc_put(ScrJsonBuf *b, const uint32_t *cps, int n) { for (int j = 0; j < n; j++) scr_case_put_cp(b, cps[j]); }
+
+/* cls: 1 tr/az, 2 lt, 3 el; `s` the subject. Contexts follow SpecialCasing.txt (After_I, Before_Dot, More_Above, After_Soft_Dotted). */
+static ScrStr *scr_str_case_conv_locale(const ScrStr *s, int to_lower, int cls) {
+  size_t n = 0;
+  uint32_t *cp = malloc(sizeof(uint32_t) * (s->len + 1));
+  size_t *off = malloc(sizeof(size_t) * (s->len + 2));
+  if (!cp || !off) abort();
+  for (size_t i = 0; i < s->len;) {
+    size_t adv;
+    off[n] = i;
+    cp[n++] = scr_case_decode(s->data + i, &adv);
+    i += adv;
+  }
+  off[n] = s->len;
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  uint32_t res[LRE_CC_RES_LEN_MAX];
+  for (size_t i = 0; i < n; i++) {
+    uint32_t c = cp[i];
+    if (cls == 1) {
+      if (to_lower) {
+        if (c == 0x130) { scr_jb_putc(&b, 'i'); continue; }
+        if (c == 0x307) { /* After_I */
+          bool afterI = false;
+          for (size_t j = i; j-- > 0;) { int cc = scr_ccc_of(cp[j]); if (cc == 0 || cc == 230) { afterI = cp[j] == 0x49; break; } }
+          if (afterI) continue;
+        }
+        if (c == 0x49) { /* Before_Dot */
+          bool dot = false;
+          for (size_t k = i + 1; k < n; k++) { int cc = scr_ccc_of(cp[k]); if (cc == 0 || cc == 230) { dot = cp[k] == 0x307 && cc == 230; break; } }
+          if (dot) { scr_jb_putc(&b, 'i'); continue; }
+          scr_case_put_cp(&b, 0x131);
+          continue;
+        }
+      } else if (c == 'i') { scr_case_put_cp(&b, 0x130); continue; }
+    } else if (cls == 2) {
+      if (to_lower) {
+        bool moreAbove = false;
+        if (c == 0x49 || c == 0x4A || c == 0x12E) {
+          for (size_t k = i + 1; k < n; k++) { int cc = scr_ccc_of(cp[k]); if (cc == 230) { moreAbove = true; break; } if (cc == 0) break; }
+        }
+        if (moreAbove) { uint32_t r[2] = { c == 0x49 ? 0x69u : c == 0x4A ? 0x6Au : 0x12Fu, 0x307 }; scr_loc_put(&b, r, 2); continue; }
+        if (c == 0xCC) { uint32_t r[3] = { 0x69, 0x307, 0x300 }; scr_loc_put(&b, r, 3); continue; }
+        if (c == 0xCD) { uint32_t r[3] = { 0x69, 0x307, 0x301 }; scr_loc_put(&b, r, 3); continue; }
+        if (c == 0x128) { uint32_t r[3] = { 0x69, 0x307, 0x303 }; scr_loc_put(&b, r, 3); continue; }
+      } else if (c == 0x307) { /* After_Soft_Dotted */
+        bool drop = false;
+        for (size_t j = i; j-- > 0;) { int cc = scr_ccc_of(cp[j]); if (cc == 230) break; if (cc == 0) { drop = scr_soft_dotted(cp[j]); break; } }
+        if (drop) continue;
+      }
+    }
+    int l;
+    if (c == 0x3a3 && to_lower && scr_final_sigma(s, off[i], off[i + 1])) { res[0] = 0x3c2; l = 1; }
+    else l = lre_case_conv(res, c, to_lower);
+    scr_loc_put(&b, res, l);
+  }
+  free(cp);
+  free(off);
+  return scr_jb_finish(&b);
+}
+
+/* Greek upper case (locale el), ICU's GreekUpper: every accent and breathing goes, a dialytika stays (precomposed on iota and
+ * upsilon), a ypogegrammeni becomes a following iota, and an eta that carried an accent keeps its tonos at the end of a word
+ * (a word is over when no cased letter follows). An iota or upsilon with no mark of its own that follows an accented vowel gets
+ * a dialytika (so the pair is not read as a diphthong). */
+static void *scr_greek_realloc(void *opaque, void *ptr, size_t size) { (void)opaque; return realloc(ptr, size); }
+
+static bool scr_greek_mark(uint32_t c) {
+  return c == 0x300 || c == 0x301 || c == 0x302 || c == 0x303 || c == 0x304 || c == 0x306 || c == 0x308 || c == 0x311 || c == 0x313 || c == 0x314 || c == 0x342 || c == 0x343 || c == 0x344 || c == 0x345;
+}
+/* The base letter of cp when it is a Greek letter (any precomposed form included), with the marks its decomposition carries. */
+static uint32_t scr_greek_base(uint32_t cp, uint32_t *marks, int *nm) {
+  *nm = 0;
+  if (!((cp >= 0x370 && cp <= 0x3ff) || (cp >= 0x1f00 && cp <= 0x1fff) || cp == 0x2126)) return 0;
+  uint32_t src[1] = { cp };
+  uint32_t *dst = NULL;
+  int n = unicode_normalize(&dst, src, 1, UNICODE_NFD, NULL, scr_greek_realloc);
+  if (n < 1) { free(dst); return 0; }
+  uint32_t b = dst[0];
+  for (int k = 1; k < n && *nm < 8; k++) marks[(*nm)++] = dst[k];
+  free(dst);
+  if ((b >= 0x391 && b <= 0x3a9 && b != 0x3a2) || (b >= 0x3b1 && b <= 0x3c9) || b == 0x3d2) return b;
+  *nm = 0;
+  for (long i = 0; i < SCR_COLL_NGK; i++)
+    if (cp >= scr_coll_gk_start[i] && cp <= scr_coll_gk_end[i]) return cp; /* another Greek letter (archaic, a variant): its marks go too, the case mapping is the root's */
+  return 0;
+}
+static bool scr_greek_vowel(uint32_t b) {
+  switch (b) {
+    case 0x391: case 0x395: case 0x397: case 0x399: case 0x39f: case 0x3a5: case 0x3a9:
+    case 0x3b1: case 0x3b5: case 0x3b7: case 0x3b9: case 0x3bf: case 0x3c5: case 0x3c9: return true;
+    default: return false;
+  }
+}
+
+static ScrStr *scr_str_greek_upper(const ScrStr *s) {
+  size_t n = 0;
+  uint32_t *cp = malloc(sizeof(uint32_t) * (s->len + 1));
+  if (!cp) abort();
+  for (size_t i = 0; i < s->len;) { size_t adv; cp[n++] = scr_case_decode(s->data + i, &adv); i += adv; }
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  uint32_t res[LRE_CC_RES_LEN_MAX];
+  bool prev_accented_vowel = false, prev_accent_precomposed = false;
+  for (size_t i = 0; i < n;) {
+    uint32_t marks[16];
+    int nm;
+    uint32_t base = scr_greek_base(cp[i], marks, &nm);
+    if (base == 0) {
+      prev_accented_vowel = false;
+      int l = lre_case_conv(res, cp[i], 0);
+      for (int j = 0; j < l; j++) scr_case_put_cp(&b, res[j]);
+      i++;
+      continue;
+    }
+    size_t k = i + 1;
+    while (k < n && scr_greek_mark(cp[k]) && nm < 14) { marks[nm++] = cp[k]; k++; }
+    bool accent = false, dial = false, macron = false;
+    int ypo = 0;
+    for (int m = 0; m < nm; m++) {
+      if (marks[m] == 0x300 || marks[m] == 0x301 || marks[m] == 0x302 || marks[m] == 0x303 || marks[m] == 0x311 || marks[m] == 0x342 || marks[m] == 0x344) accent = true;
+      if (marks[m] == 0x308 || marks[m] == 0x344) dial = true;
+      if (marks[m] == 0x345) ypo++;
+      if (marks[m] == 0x304 || marks[m] == 0x306) macron = true;
+    }
+    uint32_t up[LRE_CC_RES_LEN_MAX];
+    const int ul = lre_case_conv(up, base, 0);
+    const bool letter = (base >= 0x391 && base <= 0x3a9 && base != 0x3a2) || (base >= 0x3b1 && base <= 0x3c9) || base == 0x3d2;
+    uint32_t u = up[0];
+    bool vowel = scr_greek_vowel(base);
+    int own_marks = 0; /* marks of the cluster's own (possibly precomposed) first character */
+    bool own_dial = false, own_accent = false;
+    {
+      uint32_t m2[16];
+      int n2;
+      (void)scr_greek_base(cp[i], m2, &n2);
+      own_marks = n2;
+      for (int m = 0; m < n2; m++) {
+        if (m2[m] == 0x308 || m2[m] == 0x344) own_dial = true;
+        if (m2[m] == 0x300 || m2[m] == 0x301 || m2[m] == 0x302 || m2[m] == 0x303 || m2[m] == 0x311 || m2[m] == 0x342 || m2[m] == 0x344) own_accent = true;
+      }
+    }
+    uint32_t keep_mark = 0;
+    bool added_dial = false;
+    if (u == 0x397 && accent && ypo == 0) {
+      bool cased_follows = false, cased_before = false;
+      for (size_t q = k; q < n; q++) {
+        if (lre_is_case_ignorable(cp[q])) continue;
+        cased_follows = lre_is_cased(cp[q]);
+        break;
+      }
+      for (size_t q = i; q-- > 0;) {
+        if (lre_is_case_ignorable(cp[q])) continue;
+        cased_before = lre_is_cased(cp[q]);
+        break;
+      }
+      if (!cased_follows && !cased_before) {
+        if (own_accent) u = 0x389;
+        else keep_mark = 0x301;
+      }
+    }
+    if (u == 0x3d2 || (dial && u != 0x399 && u != 0x3a5)) {
+      scr_case_put_cp(&b, u);
+      if (dial) scr_case_put_cp(&b, 0x308);
+      if (keep_mark != 0) scr_case_put_cp(&b, keep_mark);
+    } else if ((u == 0x399 || u == 0x3a5) && own_dial) {
+      scr_case_put_cp(&b, u == 0x399 ? 0x3aa : 0x3ab);
+    } else if ((u == 0x399 || u == 0x3a5) && (prev_accented_vowel || dial)) {
+      /* the pair is no diphthong (or the dialytika is its own combining mark): precomposed after an accent written precomposed */
+      if (prev_accented_vowel && prev_accent_precomposed) scr_case_put_cp(&b, u == 0x399 ? 0x3aa : 0x3ab);
+      else { scr_case_put_cp(&b, u); scr_case_put_cp(&b, 0x308); }
+      added_dial = prev_accented_vowel && prev_accent_precomposed;
+    } else if (!letter) {
+      for (int j = 0; j < ul; j++) scr_case_put_cp(&b, up[j]);
+    } else {
+      scr_case_put_cp(&b, u);
+      if (keep_mark != 0) scr_case_put_cp(&b, keep_mark);
+    }
+    prev_accent_precomposed = own_accent;
+    for (int y = 0; y < ypo; y++) scr_case_put_cp(&b, 0x399);
+    prev_accented_vowel = vowel && accent && !own_dial && !added_dial;
+    i = k;
+  }
+  free(cp);
+  return scr_jb_finish(&b);
+}
+
+/* The language class of a tag string: a negative answer leaves Node's RangeError pending. */
+int scr_case_locale_of(const ScrStr *tag) {
+  int cls = scr_case_locale_class(tag->data, tag->len);
+  if (cls == -1) {
+    static const char msg[] = "Incorrect locale information provided";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+  } else if (cls == -2) {
+    char buf[256];
+    size_t k = 0;
+    static const char pre[] = "Invalid language tag: ";
+    memcpy(buf, pre, sizeof pre - 1);
+    k = sizeof pre - 1;
+    for (size_t i = 0; i < tag->len && k < sizeof buf - 1; i++) { char c = tag->data[i]; buf[k++] = (c >= 'A' && c <= 'Z') ? (char)(c | 0x20) : c; }
+    scr_throw_error_msg(SCR_ERR_RANGE, buf, k);
+  }
+  return cls;
+}
+
+/* s.toLocaleLowerCase(tag) / s.toLocaleUpperCase(tag) for one tag: +1, or NULL with the RangeError pending. */
+ScrStr *scr_str_to_locale_case(const ScrStr *s, const ScrStr *tag, int to_lower) {
+  int cls = scr_case_locale_of(tag);
+  if (cls < 0) return NULL;
+  if (cls == 0 || (cls == 3 && to_lower)) return to_lower ? scr_str_to_lower(s) : scr_str_to_upper(s);
+  if (cls == 3) return scr_str_greek_upper(s);
+  return scr_str_case_conv_locale(s, to_lower, cls);
+}
+
 __attribute__((constructor)) static void scr_regex_install_case_hook(void) { scr_dyn_str_case_hook = scr_str_case_conv; }
 
 /* ── String.prototype.normalize (the static path) ────────────────────────
@@ -2033,7 +2342,37 @@ static ScrDyn *scr_dyn_str_ext_method(ScrDyn *recv, const char *m, ScrDyn *const
   if (dyn_strext_is(m, "isWellFormed")) return scr_dyn_new_bool(scr_str_is_well_formed(s));
   if (dyn_strext_is(m, "toWellFormed")) return dyn_strext_str(scr_str_to_well_formed(s));
   if (dyn_strext_is(m, "toLocaleLowerCase") || dyn_strext_is(m, "toLocaleUpperCase")) {
-    if (!u0) { *handled = false; return NULL; } /* a locale argument needs ICU's language-sensitive mappings */
+    if (!u0) {
+      /* locales: a tag string, or a list whose first element is the tag (an empty list, a number, a boolean or a plain object is
+       * the default locale; null is Node's TypeError) */
+      const ScrDyn *tg = NULL;
+      if (a0->kind == SCR_DYN_STR) tg = a0;
+      else if (a0->kind == SCR_DYN_NULL) {
+        static const char msg[] = "Cannot convert undefined or null to object";
+        scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+        return NULL;
+      } else if (a0->kind == SCR_DYN_ARR && a0->v.arr.len > 0) tg = a0->v.arr.items[0];
+      if (tg != NULL) {
+        ScrStr *tag;
+        if (tg->kind == SCR_DYN_STR) {
+          tag = scr_str_retain(tg->v.str);
+        } else if (tg->kind == SCR_DYN_UNDEF || tg->kind == SCR_DYN_NULL || tg->kind == SCR_DYN_NUM || tg->kind == SCR_DYN_BOOL) {
+          static const char msg[] = "Language ID should be string or object.";
+          scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+          return NULL;
+        } else if (tg->kind == SCR_DYN_OBJ) { /* ToString is "[object Object]", which is no tag */
+          static const char msg[] = "Incorrect locale information provided";
+          scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+          return NULL;
+        } else {
+          tag = scr_dyn_string_coerce_js(tg);
+          if (tag == NULL) return NULL;
+        }
+        ScrStr *r = scr_str_to_locale_case(s, tag, dyn_strext_is(m, "toLocaleLowerCase"));
+        scr_str_release(tag);
+        return dyn_strext_str(r);
+      }
+    }
     return dyn_strext_str(dyn_strext_is(m, "toLocaleLowerCase") ? scr_str_to_lower(s) : scr_str_to_upper(s));
   }
   if (dyn_strext_is(m, "normalize")) {
