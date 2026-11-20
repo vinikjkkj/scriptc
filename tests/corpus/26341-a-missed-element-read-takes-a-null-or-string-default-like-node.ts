@@ -31,3 +31,16 @@ function show(x: number | string | null): string {
   return String(x);
 }
 console.log(show(n[i] ?? "d"), show(n[i] ?? null), show(n[0] ?? null));
+// The zapo shape: the function's own inferred return type carries the null, no annotation on the read.
+function collect(...c: Array<string | null | undefined>): readonly string[] {
+  const out: string[] = [];
+  for (const x of c) if (typeof x === "string" && x.includes("@") && !out.includes(x)) out.push(x);
+  return out;
+}
+function parent(key: { fromMe: boolean; jid: string | null }) {
+  if (key.fromMe) return null;
+  return collect(key.jid)[0] ?? null;
+}
+console.log(parent({ fromMe: false, jid: "a@b" }), parent({ fromMe: false, jid: "bad" }), parent({ fromMe: true, jid: null }));
+const arrow = (a: string[], k: number): string | null => a[k] ?? null;
+console.log(arrow(s, 9), arrow(s, 0));

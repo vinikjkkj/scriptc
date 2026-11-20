@@ -7504,6 +7504,35 @@ function comparedWithUnit(expr: ts.Expression): boolean {
   return unitLiteralDefaultOf(p.left === n ? p.right : p.left) !== null;
 }
 
+/** `return a[k] ?? null` (or a concise arrow body): the enclosing function's own return type, declared or inferred, admits the unit
+ * (`string | null` from a sibling `return null`), so the default has a home in the result slot. */
+function returnAdmitsUnit(L: Lowerer, expr: ts.Expression, unit: IrType): boolean {
+  let n: ts.Node = expr;
+  while (n.parent && ts.isParenthesizedExpression(n.parent)) n = n.parent;
+  const p = n.parent;
+  if (p === undefined) return false;
+  let fn: ts.Node | undefined;
+  if (ts.isReturnStatement(p)) {
+    fn = p.parent;
+    while (fn !== undefined && !ts.isFunctionLike(fn)) fn = fn.parent;
+  } else if (ts.isArrowFunction(p) && p.body === n) {
+    fn = p;
+  }
+  if (fn === undefined || ts.isConstructorDeclaration(fn)) return false;
+  const decl = fn as ts.SignatureDeclaration;
+  if ((ts.getCombinedModifierFlags(decl as ts.Declaration) & ts.ModifierFlags.Async) !== 0 || (decl as ts.FunctionLikeDeclaration).asteriskToken !== undefined) return false;
+  try {
+    const sig = L.checker.getSignatureFromDeclaration(decl);
+    if (sig === undefined) return false;
+    const rt = L.checker.getReturnTypeOfSignature(sig);
+    const unitFlags = unit.kind === "nullT" ? ts.TypeFlags.Null : ts.TypeFlags.Undefined | ts.TypeFlags.Void;
+    const parts: readonly ts.Type[] = rt.isUnionType() ? ts.constituentTypes(rt) : [rt];
+    return parts.some((q) => (q.flags & (unitFlags | ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0);
+  } catch {
+    return false;
+  }
+}
+
 /** Is this expression's value tested for nullish by the operator that
  * consumes it — i.e. is it the LEFT operand of an enclosing `??`
  * (parentheses tolerated)? Deliberately syntactic and deliberately
@@ -7794,7 +7823,7 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
         if (rtOk) {
           const tsR = L.typeOf(expr.right).flags;
           const open = ts.TypeFlags.Any | ts.TypeFlags.Unknown;
-          let admits = dUnit !== null && comparedWithUnit(expr);
+          let admits = dUnit !== null && (comparedWithUnit(expr) || returnAdmitsUnit(L, expr, dUnit));
           try {
             const ctx = L.checker.getContextualType(expr);
             const parts: readonly ts.Type[] = ctx === undefined ? [] : ctx.isUnionType() ? ts.constituentTypes(ctx) : [ctx];
@@ -7884,7 +7913,7 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
       // it), but the read can miss and the `null` default is the answer Node gives. Where the destination admits the unit (console.log's
       // `unknown` rest element, a `T | null` slot) the honest type is `type | unit`, and the re-tagged shape below carries the default.
       const litU = unitLiteralDefaultOf(expr.right);
-      if (litU !== null && type.kind !== "union" && rest.length === 1 && typeEquals(type, rest[0]!) && (contextualAdmitsUnit(L, expr, litU) || comparedWithUnit(expr))) {
+      if (litU !== null && type.kind !== "union" && rest.length === 1 && typeEquals(type, rest[0]!) && (contextualAdmitsUnit(L, expr, litU) || comparedWithUnit(expr) || returnAdmitsUnit(L, expr, litU))) {
         const honest = L.withUnitArmOf(type, litU);
         if (honest !== null && honest.kind === "union") type = honest;
       }
