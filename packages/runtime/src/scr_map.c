@@ -283,7 +283,7 @@ static bool scr_map_union_eq(const ScrMap *m, const ScrUnion *a, const ScrUnion 
     case '0':
       return scr_map_union_scalar_bits(a) == scr_map_union_scalar_bits(b);
     case '1':
-      return scr_str_eq((const ScrStr *)scr_union_peek(a), (const ScrStr *)scr_union_peek(b));
+      return scr_str_eq_u((ScrStr *)scr_union_peek(a), (ScrStr *)scr_union_peek(b));
     case '2': {
       const ScrBigInt *x = (const ScrBigInt *)scr_union_peek(a);
       const ScrBigInt *y = (const ScrBigInt *)scr_union_peek(b);
@@ -321,8 +321,8 @@ static bool scr_map_key_eq(const ScrMap *m, uint64_t stored, uint64_t probe) {
   if (m->key_kind == SCR_MAP_KEY_DYN)
     return m->key_eq(scr_map_slot_to_ptr(stored), scr_map_slot_to_ptr(probe));
   if (m->key_kind != SCR_MAP_KEY_STR) return stored == probe;
-  return scr_str_eq((ScrStr *)scr_map_slot_to_ptr(stored),
-                     (ScrStr *)scr_map_slot_to_ptr(probe));
+  return scr_str_eq_u((ScrStr *)scr_map_slot_to_ptr(stored),
+                      (ScrStr *)scr_map_slot_to_ptr(probe));
 }
 
 /* ── lookup ────────────────────────────────────────────────────────────
