@@ -756,7 +756,9 @@ function suppressedJsStrictness7(d: ts.Diagnostic): boolean {
   // runtime meaning in a JS file.
   if (d.code >= 8000 && d.code <= 8999) return true;
   if (JS_ANY_OPERATOR_CODES.has(d.code)) {
-    return ts.flattenDiagnosticMessageText(d, "\n").includes("'any'");
+    // `any`, or one of the lib's primitive-wrapper interfaces (`var n = new Number(5); n + 1`: plain JS, ToPrimitive on the wrapper).
+    const text = ts.flattenDiagnosticMessageText(d, "\n");
+    return text.includes("'any'") || text.includes("'Number'") || text.includes("'String'") || text.includes("'Boolean'");
   }
   return false;
 }

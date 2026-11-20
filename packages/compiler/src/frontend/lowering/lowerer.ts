@@ -25,7 +25,7 @@ import type { CjsExportRecord } from "./cjs-export-record.js";
 import { isLiveAliasName } from "./cjs-live-exports.js";
 import { copyListStmts, type CopyPart } from "./key-list-fill.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
-import { refreshMapTypeEnv, CLASS_FED_MIXED, classFedInterfacesNoted, clearClassFedInterfaces, flushMintOrder, mintPhaseControl, noteClassFedInterface, resetClassFedInterfacesGrew, resetMintLog, setGenGateKeys, setMintPhase, undefSlotWiden, CLASS_FED_INTERFACES } from "../types.js";
+import { refreshMapTypeEnv, CLASS_FED_MIXED, classFedInterfacesNoted, clearClassFedInterfaces, flushMintOrder, mintPhaseControl, noteClassFedInterface, resetClassFedInterfacesGrew, resetMintLog, setGenGateKeys, setWrapperBoxGate, setMintPhase, undefSlotWiden, CLASS_FED_INTERFACES } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
 import { fenceDynRecordCasts } from "./dyn-record-fence.js";
 import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
@@ -178,7 +178,7 @@ import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueT
 import { lowerDeleteValue, lowerElemValuePosition, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { callOnlyThisReceiverType, lowerNewTargetMember, unboundMethodThunk, recordKeyResultOk, narrowBridgeDyn, FieldTarget, bufferValueIndexOf, bufferValueOf, lowerDynObjectLiteral, lowerDynSpreadObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, numberConvAtDynWidth, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
 import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type ExpandoMember } from "./lower-expando.js";
-import { dynCallWithThis, isWidenedValueNode, lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch, throwOnlyValueType } from "./lower-calls.js";
+import { scanWrapperBoxes, reconcileWrapperMemberDyn, dynCallWithThis, isWidenedValueNode, lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch, throwOnlyValueType } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
 import { dtsWitnessClassOf } from "./lower-twin-witness.js";
 import { pairedProtoInstanceType } from "./proto-class-consume.js";
@@ -4340,6 +4340,7 @@ export class Lowerer {
     setMintPhase("collect");
     const parts = this.splitFiles();
     setGenGateKeys(scanGenGate(this, parts.map((fp) => fp.sf)));
+    setWrapperBoxGate(scanWrapperBoxes(this, parts.map((fp) => fp.sf)));
     this.collectProgram(parts);
     // Decorated classes analyze AFTER the whole collection pass: a
     // decorator's return type may name a subclass declared below the
@@ -5353,6 +5354,7 @@ export class Lowerer {
     const __colT = performance.now();
     const parts = this.splitFiles();
     setGenGateKeys(scanGenGate(this, parts.map((fp) => fp.sf)));
+    setWrapperBoxGate(scanWrapperBoxes(this, parts.map((fp) => fp.sf)));
     this.collectProgram(parts);
     // Decorated classes analyze post-collection here too: the %init seeds
     // lower the decoration calls, whose edges (decorator bodies, construct
@@ -7675,10 +7677,16 @@ export class Lowerer {
    * artifact (an index-signature read, a dyn-held slot) and the operator's
    * own ToPrimitive/ToNumber conversion is exactly what JS runs. */
   dynOperandOrigin(node: ts.Node): boolean {
-    return (
-      (this.typeOf(node).flags &
-        (ts.TypeFlags.Any | ts.TypeFlags.NumberLike | ts.TypeFlags.StringLike | ts.TypeFlags.BooleanLike)) !== 0
-    );
+    const t = this.typeOf(node);
+    const PRIM = ts.TypeFlags.Any | ts.TypeFlags.NumberLike | ts.TypeFlags.StringLike | ts.TypeFlags.BooleanLike;
+    if ((t.flags & PRIM) !== 0) return true;
+    // A union of primitives (what `v.valueOf()` answers over a String | Number | Boolean receiver) is the same kind of width artifact.
+    if ((t.flags & ts.TypeFlags.Union) !== 0 && ts.constituentTypes(t).every((u) => (u.flags & PRIM) !== 0)) return true;
+    // The lib's String / Number / Boolean interface types: a program that constructs a wrapper holds them as dynamic values, and an
+    // operator runs the wrapper's own ToPrimitive (its primitive value) exactly as it does for the dyn the primitive travels as.
+    const sym = t.getSymbol();
+    return sym !== undefined && (sym.name === "String" || sym.name === "Number" || sym.name === "Boolean") &&
+      this.checker.declarationsOf(sym).some((d) => this.isStdlibFile(d.getSourceFile()));
   }
 
   /** SCRIPTC_DYN_WHY (compiler-development probe): for every site that
@@ -21075,7 +21083,7 @@ export class Lowerer {
       lowerFetchCall(this, expr) ??
       lowerDynamicImportCall(this, expr) ??
       lowerCall(this, expr);
-    return reconcileOverloadMemberDyn(this, expr, call);
+    return reconcileWrapperMemberDyn(this, expr, reconcileOverloadMemberDyn(this, expr, call));
   }
 
   isTopLevelFnSymbol(ident: ts.Identifier): boolean {

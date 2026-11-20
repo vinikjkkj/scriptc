@@ -5743,147 +5743,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         return { kind: "libCall", fn: "dyn.toObject", args: [dv], type: DYN, loc };
       }
     }
-    if (
-      ts.isIdentifier(expr.expression) &&
-      (expr.expression.text === "String" ||
-        expr.expression.text === "Boolean" ||
-        expr.expression.text === "Number") &&
-      L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined)
-    ) {
-      const name = expr.expression.text;
-      if (expr.arguments.length > 1) {
-        L.noLowering(`${name} with ${expr.arguments.length} arguments`, expr);
-      }
-      const argNode = expr.arguments[0];
-      if (argNode !== undefined && name !== "Boolean") {
-        const pre = L.lowerExpr(argNode);
-        if (pre.type.kind === "bigint") {
-          // Number(1n) is the nearest double; String(1n) is the DIGITS with
-          // no `n` suffix (the suffix belongs to inspect, not to String).
-          return name === "Number"
-            ? { kind: "libCall", fn: "big.toF64", args: [pre], type: F64, loc }
-            : {
-                kind: "libCall",
-                fn: "big.str",
-                args: [pre, { kind: "numLit", value: 10, type: F64, loc }],
-                type: STRING,
-                loc,
-              };
-        }
-      }
-      if (!argNode) {
-        if (name === "String") return { kind: "strLit", value: "", type: STRING, loc };
-        if (name === "Boolean") return { kind: "boolLit", value: false, type: BOOL, loc };
-        return { kind: "numLit", value: 0, type: F64, loc };
-      }
-      // String(e) on a catch binding: the snapshot's own ToString —
-      // intercepted before lowerExpr (caughtRead would fence the raw read).
-      if (name === "String") {
-        const caught = L.caughtToString(argNode);
-        if (caught) return caught;
-      }
-      // Boolean(x) IS condition position: route through lowerCondition so
-      // `&&`/`||` operands descend as ToBoolean'd conditions (JS-exact —
-      // `Boolean(a && b)` ≡ `Boolean(a) && Boolean(b)`, short-circuit
-      // preserved). This also admits mixed-kind operands with no VALUE
-      // representation (`Boolean(rec && list.some(f))` — a record and a
-      // bool) that a value lowering of the `&&` would fence on.
-      if (name === "Boolean") return L.lowerCondition(argNode);
-      const arg = L.lowerExpr(argNode);
-      if (name === "String") return L.ensureString(arg, argNode, true);
-      // Number(x) at the READ's slot width, the twin of the rule
-      // ensureString has always had (numberConvAtDynWidth, lower-exprs).
-      // `Number(node.attrs.size)` on an absent key is NaN in Node and was
-      // an uncatchable ABORT here, while `String(node.attrs.size)` on the
-      // same read already printed `undefined`: one conversion had the rule
-      // and its sibling did not.  A declined rung leaves `arg` untouched
-      // and every arm below is what it was.
-      {
-        const atWidth = L.numberConvAtDynWidth(arg);
-        if (atWidth) return { kind: "libCall", fn: "dyn.numberOf", args: [atWidth], type: F64, loc };
-      }
-      if (arg.type.kind === "f64") return { kind: "libCall", fn: "num.canon", args: [arg], type: F64, loc }; // a marker is ToNumber NaN (scr_runtime.h)
-      if (arg.type.kind === "bool") {
-        return {
-          kind: "ternary",
-          cond: arg,
-          then: { kind: "numLit", value: 1, type: F64, loc },
-          else_: { kind: "numLit", value: 0, type: F64, loc },
-          type: F64,
-          loc,
-        };
-      }
-      if (arg.type.kind === "string") {
-        return { kind: "libCall", fn: "num.fromString", args: [arg], type: F64, loc };
-      }
-      // Number(v) over a CHECKED-DYNAMIC value in untyped JS: ToNumber is
-      // exactly what the call means, and the runtime now performs it —
-      // the same conversion the arithmetic operators run on an untyped
-      // operand. The reference kinds still throw there, so the fence does
-      // not disappear, it moves to the values that really need a
-      // prototype. TS `any` keeps today's refusal: the island retry owns
-      // that tier, the JS-file stance is the binary operators'.
-      //
-      // ...and TS `unknown` joins the JS stance rather than `any`'s,
-      // because the two tiers are drawn around the ISLAND and `unknown`
-      // has no business there. `any` defers to the island retry, which can
-      // run the real ToNumber with a real prototype chain. `unknown` has no
-      // such tier: TypeScript will not let a program do anything with it
-      // until it is narrowed, and `Number(x)` is the documented way to
-      // convert one. In a STATIC build the refusal was the only outcome for
-      // a conversion Node defines exactly and this runtime already
-      // implements — @zapo-js/wam's registry.ts:77 reads a payload value out
-      // of a `Readonly<Record<string, unknown>>` and converts it, and that
-      // one site was a hard stop.
-      //
-      // Nothing is loosened about what CAN be converted: this is the same
-      // scr_dyn_to_number the JS lane takes, so the primitives follow
-      // ECMA-262 7.1.4 exactly (string -> StringToNumber, bool -> 1/0,
-      // null -> +0, undefined -> NaN) and every reference kind still throws
-      // the loud dynCheck that names the site. Measured against node
-      // v25.9.0 over all six: '42'->42, true->1, 7->7, 'x'->NaN, null->0,
-      // and an absent key->NaN.
-      //
-      // anyOrigin is the discriminator rather than a syntactic test for the
-      // `unknown` keyword, because it is the same question the any-tier
-      // fence (anyOpFence) already asks, so the two cannot drift apart.
-      //
-      // TS `any` takes the same route (2026-10-29, mgnumconv). Its value is
-      // the same checked-dynamic tree; the refusal that stood here sent
-      // `Number(JSON.parse(s).expires_in)` (mongodb azure_machine_workflow.ts:54)
-      // to a deferred engine that a static build does not include. ToNumber
-      // needs no engine: scr_dyn_to_number answers every primitive kind and
-      // runs ToPrimitive over the reference kinds. The `anyOrigin` split is
-      // gone for Number only; the binary operators keep their own fences.
-      if (arg.type.kind === "dyn") {
-        return { kind: "libCall", fn: "dyn.numberOf", args: [arg], type: F64, loc };
-      }
-      // A union of statically-typed arms (numbers, strings, booleans,
-      // null/undefined and class instances whose valueOf or toString the
-      // program declares): one tag-tested helper, Node's ToNumber per arm.
-      // An arm with no such reading keeps the refusal below.
-      if (arg.type.kind === "union") {
-        const helper = numberUnionHelper(L, arg.type, loc);
-        if (helper !== null) return { kind: "call", callee: helper, args: [arg], type: F64, loc };
-      }
-      // A class instance on its own (not inside a union) takes the same
-      // ToPrimitive(number) conversion as a union arm.
-      if (arg.type.kind === "object") {
-        const conv = classInstanceToNumberIR(L, arg, loc);
-        if (conv !== null) return conv;
-      }
-      // Number(date) is the date's time value (Date.prototype.valueOf through ToPrimitive's number hint): the same ms
-      // `date.getTime()` reads, NaN for an invalid date (debug's `Number(new Date())`).
-      if (arg.type.kind === "date") {
-        return { kind: "libCall", fn: "date.value", args: [arg], type: F64, loc };
-      }
-      L.noLowering(
-        `Number of ${L.fmt(arg.type)} values`,
-        argNode,
-        arg.type.kind === "union"
-          ? "numbers, booleans, and strings lower (the full ToNumber string grammar included) — narrow the union first"
-          : undefined,
-      );
+    {
+      const prim = lowerPrimitiveConversion(L, expr, loc);
+      if (prim !== null) return prim;
     }
 
     // __island_eval: the internal island testing hook (eval in the embedded
@@ -18403,4 +18265,190 @@ function bufOnlyDynCall(L: Lowerer, call: ts.CallExpression, access: ts.Property
   return L.coerceInto(call, dynCall, want);
 }
 
+/** `String(x)` / `Number(x)` / `Boolean(x)` over the standard library's own global: the primitive conversion. Shared by the call and by
+ *  `new String(x)` (the wrapper object is this value boxed, lowerNew). Null when the callee is not one of the three. */
+export function lowerPrimitiveConversion(L: Lowerer, expr: ts.CallExpression | ts.NewExpression, loc: SrcLoc): IrExpr | null {
+  const callArgs = expr.arguments ?? [];
+    if (
+      ts.isIdentifier(expr.expression) &&
+      (expr.expression.text === "String" ||
+        expr.expression.text === "Boolean" ||
+        expr.expression.text === "Number") &&
+      L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined)
+    ) {
+      const name = expr.expression.text;
+      if (callArgs.length > 1) {
+        L.noLowering(`${name} with ${callArgs.length} arguments`, expr);
+      }
+      const argNode = callArgs[0];
+      if (argNode !== undefined && name !== "Boolean") {
+        const pre = L.lowerExpr(argNode);
+        if (pre.type.kind === "bigint") {
+          // Number(1n) is the nearest double; String(1n) is the DIGITS with
+          // no `n` suffix (the suffix belongs to inspect, not to String).
+          return name === "Number"
+            ? { kind: "libCall", fn: "big.toF64", args: [pre], type: F64, loc }
+            : {
+                kind: "libCall",
+                fn: "big.str",
+                args: [pre, { kind: "numLit", value: 10, type: F64, loc }],
+                type: STRING,
+                loc,
+              };
+        }
+      }
+      if (!argNode) {
+        if (name === "String") return { kind: "strLit", value: "", type: STRING, loc };
+        if (name === "Boolean") return { kind: "boolLit", value: false, type: BOOL, loc };
+        return { kind: "numLit", value: 0, type: F64, loc };
+      }
+      // String(e) on a catch binding: the snapshot's own ToString —
+      // intercepted before lowerExpr (caughtRead would fence the raw read).
+      if (name === "String") {
+        const caught = L.caughtToString(argNode);
+        if (caught) return caught;
+      }
+      // Boolean(x) IS condition position: route through lowerCondition so
+      // `&&`/`||` operands descend as ToBoolean'd conditions (JS-exact —
+      // `Boolean(a && b)` ≡ `Boolean(a) && Boolean(b)`, short-circuit
+      // preserved). This also admits mixed-kind operands with no VALUE
+      // representation (`Boolean(rec && list.some(f))` — a record and a
+      // bool) that a value lowering of the `&&` would fence on.
+      if (name === "Boolean") return L.lowerCondition(argNode);
+      const arg = L.lowerExpr(argNode);
+      if (name === "String") return L.ensureString(arg, argNode, true);
+      // Number(x) at the READ's slot width, the twin of the rule
+      // ensureString has always had (numberConvAtDynWidth, lower-exprs).
+      // `Number(node.attrs.size)` on an absent key is NaN in Node and was
+      // an uncatchable ABORT here, while `String(node.attrs.size)` on the
+      // same read already printed `undefined`: one conversion had the rule
+      // and its sibling did not.  A declined rung leaves `arg` untouched
+      // and every arm below is what it was.
+      {
+        const atWidth = L.numberConvAtDynWidth(arg);
+        if (atWidth) return { kind: "libCall", fn: "dyn.numberOf", args: [atWidth], type: F64, loc };
+      }
+      if (arg.type.kind === "f64") return { kind: "libCall", fn: "num.canon", args: [arg], type: F64, loc }; // a marker is ToNumber NaN (scr_runtime.h)
+      if (arg.type.kind === "bool") {
+        return {
+          kind: "ternary",
+          cond: arg,
+          then: { kind: "numLit", value: 1, type: F64, loc },
+          else_: { kind: "numLit", value: 0, type: F64, loc },
+          type: F64,
+          loc,
+        };
+      }
+      if (arg.type.kind === "string") {
+        return { kind: "libCall", fn: "num.fromString", args: [arg], type: F64, loc };
+      }
+      // Number(v) over a CHECKED-DYNAMIC value in untyped JS: ToNumber is
+      // exactly what the call means, and the runtime now performs it —
+      // the same conversion the arithmetic operators run on an untyped
+      // operand. The reference kinds still throw there, so the fence does
+      // not disappear, it moves to the values that really need a
+      // prototype. TS `any` keeps today's refusal: the island retry owns
+      // that tier, the JS-file stance is the binary operators'.
+      //
+      // ...and TS `unknown` joins the JS stance rather than `any`'s,
+      // because the two tiers are drawn around the ISLAND and `unknown`
+      // has no business there. `any` defers to the island retry, which can
+      // run the real ToNumber with a real prototype chain. `unknown` has no
+      // such tier: TypeScript will not let a program do anything with it
+      // until it is narrowed, and `Number(x)` is the documented way to
+      // convert one. In a STATIC build the refusal was the only outcome for
+      // a conversion Node defines exactly and this runtime already
+      // implements — @zapo-js/wam's registry.ts:77 reads a payload value out
+      // of a `Readonly<Record<string, unknown>>` and converts it, and that
+      // one site was a hard stop.
+      //
+      // Nothing is loosened about what CAN be converted: this is the same
+      // scr_dyn_to_number the JS lane takes, so the primitives follow
+      // ECMA-262 7.1.4 exactly (string -> StringToNumber, bool -> 1/0,
+      // null -> +0, undefined -> NaN) and every reference kind still throws
+      // the loud dynCheck that names the site. Measured against node
+      // v25.9.0 over all six: '42'->42, true->1, 7->7, 'x'->NaN, null->0,
+      // and an absent key->NaN.
+      //
+      // anyOrigin is the discriminator rather than a syntactic test for the
+      // `unknown` keyword, because it is the same question the any-tier
+      // fence (anyOpFence) already asks, so the two cannot drift apart.
+      //
+      // TS `any` takes the same route (2026-10-29, mgnumconv). Its value is
+      // the same checked-dynamic tree; the refusal that stood here sent
+      // `Number(JSON.parse(s).expires_in)` (mongodb azure_machine_workflow.ts:54)
+      // to a deferred engine that a static build does not include. ToNumber
+      // needs no engine: scr_dyn_to_number answers every primitive kind and
+      // runs ToPrimitive over the reference kinds. The `anyOrigin` split is
+      // gone for Number only; the binary operators keep their own fences.
+      if (arg.type.kind === "dyn") {
+        return { kind: "libCall", fn: "dyn.numberOf", args: [arg], type: F64, loc };
+      }
+      // A union of statically-typed arms (numbers, strings, booleans,
+      // null/undefined and class instances whose valueOf or toString the
+      // program declares): one tag-tested helper, Node's ToNumber per arm.
+      // An arm with no such reading keeps the refusal below.
+      if (arg.type.kind === "union") {
+        const helper = numberUnionHelper(L, arg.type, loc);
+        if (helper !== null) return { kind: "call", callee: helper, args: [arg], type: F64, loc };
+      }
+      // A class instance on its own (not inside a union) takes the same
+      // ToPrimitive(number) conversion as a union arm.
+      if (arg.type.kind === "object") {
+        const conv = classInstanceToNumberIR(L, arg, loc);
+        if (conv !== null) return conv;
+      }
+      // Number(date) is the date's time value (Date.prototype.valueOf through ToPrimitive's number hint): the same ms
+      // `date.getTime()` reads, NaN for an invalid date (debug's `Number(new Date())`).
+      if (arg.type.kind === "date") {
+        return { kind: "libCall", fn: "date.value", args: [arg], type: F64, loc };
+      }
+      L.noLowering(
+        `Number of ${L.fmt(arg.type)} values`,
+        argNode,
+        arg.type.kind === "union"
+          ? "numbers, booleans, and strings lower (the full ToNumber string grammar included) — narrow the union first"
+          : undefined,
+      );
+    }
+  return null;
+}
 
+/** Does any file of the program construct a primitive wrapper (`new String(x)`, `new Number(x)`, `new Boolean(x)` over the standard library's
+ *  own global)? Decided once per lowering, before any type is mapped: a program that does maps the lib's `String` / `Number` / `Boolean`
+ *  INTERFACE types to the dynamic value (a wrapper is an object, so those slots cannot hold only the primitive); every other program maps
+ *  them as it always did. Only files whose text names the construction are walked (iteratively). */
+export function scanWrapperBoxes(L: Lowerer, files: readonly ts.SourceFile[]): boolean {
+  const RE = /\bnew\s+(?:String|Number|Boolean)\b/;
+  for (const sf of files) {
+    const text = sf.text;
+    if (text === undefined || !RE.test(text)) continue;
+    const stack: ts.Node[] = [sf];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) &&
+          (n.expression.text === "String" || n.expression.text === "Number" || n.expression.text === "Boolean") &&
+          L.isStdlibSymbol(L.resolveValueSymbol(n.expression) ?? undefined)) {
+        return true;
+      }
+      n.forEachChild((c) => { stack.push(c); });
+    }
+  }
+  return false;
+}
+
+/** A call of a method read off the lib's `String` / `Number` / `Boolean` INTERFACE type in a program whose wrappers are dynamic values
+ *  (types.ts wrapperBoxGate): the member answers DYN at run time, and the checker's resolved return type (`number`, `string`, `boolean`)
+ *  is the claim, extracted with the checked read exactly as an overloaded member's is. */
+export function reconcileWrapperMemberDyn(L: Lowerer, expr: ts.CallExpression, call: IrExpr): IrExpr {
+  if (call.type.kind !== "dyn" || !ts.isPropertyAccessExpression(expr.expression)) return call;
+  const recv = L.checker.getNonNullableType(L.typeOf(expr.expression.expression));
+  const sym = recv.getSymbol();
+  if (sym === undefined || (sym.name !== "String" && sym.name !== "Number" && sym.name !== "Boolean")) return call;
+  if (!L.checker.declarationsOf(sym).some((d) => L.isStdlibFile(d.getSourceFile()))) return call;
+  const rsig = L.checker.getResolvedSignature(expr);
+  if (!rsig) return call;
+  const rt = L.mapTypeOf(L.checker.getReturnTypeOfSignature(rsig));
+  if (!rt || (rt.kind !== "f64" && rt.kind !== "string" && rt.kind !== "bool")) return call;
+  return { kind: "dynCheck", value: call, type: rt, loc: call.loc };
+}

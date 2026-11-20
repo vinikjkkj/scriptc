@@ -4,6 +4,7 @@
  * accessor access, upcasts, `new` expressions, and the builtin Error
  * hierarchy registration. */
 import { isPrintArgLiteral } from "./inspect-any-literal.js";
+import { lowerPrimitiveConversion } from "./lower-calls.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { protoDataFieldNames, registerProtoData } from "./lower-protodata.js";
 import { appliesEmitterMixin, EMITTER_MIXIN_FIELD, graftCtorEmitterInit } from "./lower-emitter-mixin.js";
@@ -12234,6 +12235,21 @@ function lowerUrlNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc, symbol: ts
 
 export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     const loc = locOf(expr);
+    // `new String(x)` / `new Number(x)` / `new Boolean(x)`: the wrapper OBJECT of the primitive the call form computes (the lib's
+    // String / Number / Boolean interface types map to the dynamic value in a program that constructs one, types.ts wrapperBoxGate),
+    // so `typeof` answers "object", each construction is a distinct identity, and the wrapper prints and converts as Node's does.
+    if (ts.isIdentifier(expr.expression) &&
+        (expr.expression.text === "String" || expr.expression.text === "Number" || expr.expression.text === "Boolean") &&
+        L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined) &&
+        (expr.arguments?.length ?? 0) <= 1 && !(expr.arguments ?? []).some((a) => ts.isSpreadElement(a))) {
+      // `new String(sym)` is ToString(sym), which THROWS for a symbol where the call `String(sym)` describes it: the implicit conversion.
+      const strArg = expr.expression.text === "String" ? expr.arguments?.[0] : undefined;
+      let prim = strArg !== undefined ? (L.caughtToString(strArg) ?? L.ensureString(L.lowerExpr(strArg), strArg)) : lowerPrimitiveConversion(L, expr, loc);
+      if (prim !== null && prim.kind === "toString" && prim.operand.type.kind === "dyn" && prim.hint === undefined) prim = { ...prim, hint: "template" };
+      if (prim !== null) {
+        return { kind: "libCall", fn: "dyn.toObject", args: [L.coerceToExpected(prim, DYN)], type: DYN, loc };
+      }
+    }
     /* better-sqlite3's `new Database(path, options?)` — the ONE npm
      * package the static lane serves itself. AHEAD of the npm fence
      * below, which is what it exists to answer: with

@@ -1785,6 +1785,12 @@ function bodyReadsArgumentsLocal(fn: { body?: ts.Node | undefined }): boolean {
  * type of a generator whose body returns a value under TReturn any/unknown, and `R:<yield type>` for the matching
  * IteratorResult<Y, any>. Set once per lowering (Lowerer.run), before any type is mapped; empty means no generator in the
  * program changes. */
+/** The program constructs a primitive wrapper (`new String(x)`): the lib's String / Number / Boolean interface types map to the dynamic value for
+ * this lowering (scanWrapperBoxes). Set once per lowering, before any type is mapped. */
+let wrapperBoxGate = false;
+export function setWrapperBoxGate(on: boolean): void {
+  wrapperBoxGate = on;
+}
 let genGateKeys: ReadonlySet<string> = new Set();
 export function setGenGateKeys(keys: ReadonlySet<string>): void {
   genGateKeys = keys;
@@ -2456,6 +2462,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       (boxSym.name === "Number" || boxSym.name === "String" || boxSym.name === "Boolean") &&
       checker.declarationsOf(boxSym).some((d) => ctx.isStdlibFile(d.getSourceFile()))
     ) {
+      if (wrapperBoxGate) return DYN;
       return boxSym.name === "Number" ? F64 : boxSym.name === "String" ? STRING : BOOL;
     }
   }
