@@ -1034,7 +1034,7 @@ static bool scr_arr_ref_eq(const ScrArr *a, uint64_t slot, void *v) {
   /* An ABSENT slot matches only an absent needle: scr_str_eq dereferences
    * both sides, so the STR arm cannot be handed a hole. */
   if (p == NULL || v == NULL) return p == v;
-  if (a->elem == SCR_ELEM_STR) return scr_str_eq_u((ScrStr *)p, (ScrStr *)v);
+  if (a->elem == SCR_ELEM_STR) return scr_str_eq_k((const ScrStr *)p, (const ScrStr *)v);
   return p == v;
 }
 
