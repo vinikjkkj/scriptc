@@ -164,10 +164,10 @@ void scr_fh_close_raw(ScrFileHandle *h) {
  * scr_promise_settled_ref through the `promise.settled` intrinsic. */
 ScrPromise *scr_fsp_open(ScrStr *path, ScrStr *flags) {
   ScrFileHandle *h = scr_fh_open_raw(path, flags);
-  return scr_promise_settled_ref(h, &scr_fh_retain_v, &scr_fh_release_v, NULL);
+  return scr_promise_settle_later(scr_promise_settled_ref(h, &scr_fh_retain_v, &scr_fh_release_v, NULL));
 }
 
 ScrPromise *scr_fh_close(ScrFileHandle *h) {
   scr_fh_close_raw(h); /* idempotent: Node's second close() resolves */
-  return scr_promise_settled_void();
+  return scr_promise_settle_later(scr_promise_settled_void());
 }

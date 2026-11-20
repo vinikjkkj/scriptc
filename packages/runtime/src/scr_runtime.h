@@ -13258,6 +13258,11 @@ void scr_work_submit(ScrWork *w);
 /* The same, with the consumer's estimate of the job's CPU cost in
  * microseconds: a cheap job runs inline at submit (see scr_pool.c). */
 void scr_work_submit_cost(ScrWork *w, double est_us);
+/* A PENDING promise that takes `settled`'s outcome (+1, consumed) from the
+ * poll station: Node's delivery time for threadpool APIs the runtime serves
+ * with a blocking call whose outcome is already known (fs/promises, the
+ * asymmetric-crypto promises). */
+ScrPromise *scr_promise_settle_later(ScrPromise *settled);
 /* The loop-side registration (scr_async.c, always linked). `wait` is the
  * Windows bounded sleep (NULL elsewhere: the poll(2) fd serves); teardown
  * drops every undelivered job (done(w,false)) after running ones finish. */
