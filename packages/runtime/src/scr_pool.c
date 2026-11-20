@@ -91,6 +91,8 @@ static struct {
   size_t outstanding;         /* submitted - delivered */
   bool stats;                 /* SCR_POOL_STATS: print the census at exit */
   size_t n_submitted, n_inline, n_threaded;
+  struct { const char *name; size_t inl, thr; double est_us; } kinds[16]; /* main thread only */
+  unsigned nkinds;
   double worker_cpu_ns;       /* guarded by m: thread CPU spent inside run() on workers */
   double inline_cpu_ns;       /* main thread only: CPU spent inside run() inline */
   ScrWork *batch_head, *batch_tail; /* taken from dq, `done` not yet run */
@@ -349,12 +351,42 @@ static unsigned scr_pl_size(void) {
   return (unsigned)n;
 }
 
+static void scr_pl_tally(const ScrWork *w, bool inl, double est_us) {
+  const char *name = w->name != NULL ? w->name : "?";
+  unsigned i = 0;
+  while (i < P.nkinds && P.kinds[i].name != name) i++;
+  if (i == P.nkinds) {
+    if (i == 16) i = 15; /* overflow bucket */
+    else {
+      P.kinds[i].name = name;
+      P.nkinds++;
+    }
+  }
+  if (inl) P.kinds[i].inl++;
+  else P.kinds[i].thr++;
+  P.kinds[i].est_us += est_us;
+}
+
+/* The census goes to stderr, or APPENDS to the file the variable names when
+ * its value is a path (the bench harness echoes *.txt files from its
+ * artifacts directory into the job log). */
 static void scr_pl_report(void) {
   SCR_PL_LOCK(&P.m);
   double ns = P.worker_cpu_ns;
   SCR_PL_UNLOCK(&P.m);
-  fprintf(stderr, "scr-pool: submitted=%zu inline=%zu threaded=%zu worker_cpu_ms=%.1f inline_cpu_ms=%.1f threads=%u\n",
+  const char *dest = getenv("SCR_POOL_STATS");
+  FILE *out = stderr;
+  if (dest != NULL && dest[0] != '\0' && strcmp(dest, "1") != 0) {
+    FILE *f = fopen(dest, "a");
+    if (f != NULL) out = f;
+  }
+  fprintf(out, "scr-pool: submitted=%zu inline=%zu threaded=%zu worker_cpu_ms=%.1f inline_cpu_ms=%.1f threads=%u\n",
           P.n_submitted, P.n_inline, P.n_threaded, ns / 1e6, P.inline_cpu_ns / 1e6, P.nthreads);
+  for (unsigned i = 0; i < P.nkinds; i++) {
+    fprintf(out, "scr-pool:   %-14s inline=%zu threaded=%zu est_cpu_ms=%.1f\n", P.kinds[i].name, P.kinds[i].inl,
+            P.kinds[i].thr, P.kinds[i].est_us / 1e3);
+  }
+  if (out != stderr) fclose(out);
 }
 
 static void scr_pl_init(void) {
@@ -416,6 +448,7 @@ void scr_work_submit_cost(ScrWork *w, double est_us) {
   if (est_us < P.inline_us && P.wq_head == NULL && (P.idle > 0 || P.nthreads < P.max)) {
     SCR_PL_UNLOCK(&P.m);
     P.n_inline++;
+    if (P.stats) scr_pl_tally(w, true, est_us);
     double ti = P.stats ? scr_pl_thread_cpu_ns() : 0;
     w->run(w);
     if (P.stats) P.inline_cpu_ns += scr_pl_thread_cpu_ns() - ti;
@@ -427,6 +460,7 @@ void scr_work_submit_cost(ScrWork *w, double est_us) {
     return;
   }
   P.n_threaded++;
+  if (P.stats) scr_pl_tally(w, false, est_us < 1e17 ? est_us : 0);
   if (P.wq_tail != NULL) P.wq_tail->next = w;
   else P.wq_head = w;
   P.wq_tail = w;
@@ -494,6 +528,7 @@ static void scr_later_done(ScrWork *w, bool ran) {
 ScrPromise *scr_promise_settle_later(ScrPromise *settled) {
   ScrLaterJob *j = malloc(sizeof *j);
   if (j == NULL) scr_bytes_io_oom();
+  j->w.name = "settle-later";
   j->w.run = scr_later_run;
   j->w.done = scr_later_done;
   j->src = settled;

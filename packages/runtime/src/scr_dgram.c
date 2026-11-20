@@ -1121,6 +1121,7 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
     free(p);
     ScrDnsJob *j = calloc(1, sizeof *j);
     if (!j) scr_dgram_oom();
+  j->w.name = "dns.lookup";
     j->w.run = scr_dns_job_run;
     j->w.done = scr_dns_job_done;
     j->host = strdup(hostname->data);

@@ -52,6 +52,7 @@ ScrPromise *scr_crypto_random_bytes_async(double n) {
   }
   ScrRbJob *j = malloc(sizeof *j);
   if (j == NULL) scr_bytes_io_oom();
+  j->w.name = "randomBytes";
   j->w.run = scr_rb_run;
   j->w.done = scr_rb_done;
   j->out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, n));
@@ -90,6 +91,7 @@ ScrPromise *scr_crypto_random_int_async(double min, double max) {
   if (!scr_crypto_random_int_check(min, max, &r)) return scr_ca_rejected();
   ScrRiJob *j = malloc(sizeof *j);
   if (j == NULL) scr_bytes_io_oom();
+  j->w.name = "randomInt";
   j->w.run = scr_ri_run;
   j->w.done = scr_ri_done;
   j->min = min;
@@ -140,6 +142,7 @@ ScrPromise *scr_crypto_pbkdf2_sha256_async(const ScrBytes *password, const ScrBy
   if (!scr_crypto_pbkdf2_sha256_check(iterations, keylen)) return scr_ca_rejected();
   ScrPbJob *j = malloc(sizeof *j);
   if (j == NULL) scr_bytes_io_oom();
+  j->w.name = "pbkdf2";
   j->w.run = scr_pb_run;
   j->w.done = scr_pb_done;
   j->pwlen = password->len;

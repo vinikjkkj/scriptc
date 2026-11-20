@@ -146,6 +146,7 @@ void scr_crypto_random_fill_deferred(ScrBytes *b, double offset, double size,
    * releases it in scr_rf_done; the worker touches nothing refcounted. */
   ScrRandFillJob *j = malloc(sizeof *j);
   if (j == NULL) scr_bytes_io_oom();
+  j->w.name = "randomFill";
   j->w.run = scr_rf_run;
   j->w.done = scr_rf_done;
   j->buf = scr_bytes_retain(b);
