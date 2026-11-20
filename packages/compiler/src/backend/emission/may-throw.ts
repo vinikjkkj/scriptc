@@ -1,6 +1,7 @@
 /* Cheap whole-module may-throw analysis (see computeMayThrow). Pure function
  * of the IR module; the emitter consults the result to place unwind checks. */
 import type { IrArrIntrinsicMethod, IrBytesIntrinsicMethod, IrLibFn, IrModule, IrType } from "../../ir/nodes.js";
+import { absentRecvMember } from "./absent-recv.js";
 import { MAY_THROW_ARR_METHODS, MAY_THROW_BYTES_METHODS, MAY_THROW_LIB_FNS, ownMaskKeyBit } from "../../ir/nodes.js";
 
 /** Does a dynCheck against `t` mint a function ADAPTER anywhere inside it?
@@ -391,6 +392,8 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // normalize(form) throws Node's catchable RangeError for a form
           // other than NFC/NFD/NFKC/NFKD (scr_str_normalize, exception cell).
           if (rec["method"] === "normalize" || rec["method"] === "toLocaleLowerCase" || rec["method"] === "toLocaleUpperCase") f.throws = true;
+          // A module that can hold the absent string: a member use of it throws Node's TypeError (scr_str_recv_u).
+          if (mod.absentStrings === true && absentRecvMember(rec["method"] as string) !== undefined) f.throws = true;
           break;
         case "arraySet":
         case "arrayClear":
