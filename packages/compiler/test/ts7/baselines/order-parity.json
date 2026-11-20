@@ -17623,6 +17623,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26143-the-engine-console-groups-counts-dirs-and-tables-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26143-the-engine-console-groups-counts-dirs-and-tables-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26144-the-engine-console-reports-assert-trace-and-timer-misuse-on-stderr.ts": {
+   "order": [
+    "<repo>/tests/corpus/26144-the-engine-console-reports-assert-trace-and-timer-misuse-on-stderr.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2615-nullish-field-record-binding.ts": {
    "order": [
     "<repo>/tests/corpus/2615-nullish-field-record-binding.ts"
