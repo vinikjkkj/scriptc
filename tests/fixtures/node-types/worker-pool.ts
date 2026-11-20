@@ -9,7 +9,8 @@
 //  - argument errors REJECT the promise (they never throw out of the call);
 //  - 150 concurrent requests all resolve with the right shape;
 //  - concurrent pbkdf2 derivations resolve to their deterministic values;
-//  - zlib round trips through the pool.
+//  - zlib round trips through the pool;
+//  - a timer awaited after the pool work fires after it (a timer racing the work has no pinned place: its position follows the host's speed).
 // Random bytes are never printed.
 import { randomBytes, randomInt, pbkdf2 } from "node:crypto";
 import { deflate, unzip } from "node:zlib";
@@ -66,8 +67,11 @@ async function main(): Promise<void> {
     const err = e as Error & { code?: string; errno?: number };
     n("unzip err " + err.code + " " + err.errno + " " + err.message);
   }
+  // A timer is awaited IN SEQUENCE: a timer racing the chain above lands wherever the machine's speed puts it (Node's own position moves
+  // with the host, and a sanitized build is slower still), so it can only be pinned once nothing else is in flight.
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  n("timer20");
 }
-setTimeout(() => n("timer20"), 20);
 main().then(() => {
   setTimeout(() => {
     console.log(log.join("\n"));
