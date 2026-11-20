@@ -20830,7 +20830,6 @@ export class Lowerer {
       if (!sf.text.includes(" as {") && !sf.text.includes("<{")) continue;
       ts.forEachChild(sf, visit);
     }
-    if (process.env["SCRIPTC_DEMAND_WHY"] !== undefined) process.stderr.write(`[demand] keys=${String(out.size)} ${[...out.values()].map((v) => v.map((x) => x.name).join(",")).join(";")}\n`);
     return out;
   }
 
