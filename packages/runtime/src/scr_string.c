@@ -1536,6 +1536,9 @@ bool scr_str_is_absent(const ScrStr *s) { return s == (const ScrStr *)&scr_lit_a
 /* The same sentinel as data, for scr_arr_try_ref (no call on the hit path). */
 const void *const scr_str_absent_sentinel = &scr_lit_absent;
 
+ScrStr *(*scr_dyn_str_case_hook)(const ScrStr *s, int to_lower) = NULL;
+ScrDyn *(*scr_dyn_str_ext_hook)(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, bool *handled) = NULL;
+
 /* Interned when the content is empty or one ASCII byte; fresh otherwise. */
 static ScrStr *scr_str_from_span(const char *bytes, size_t len) {
   if (len == 0) return scr_str_empty();
