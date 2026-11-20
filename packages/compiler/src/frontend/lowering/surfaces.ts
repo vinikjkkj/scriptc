@@ -1976,7 +1976,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     ) {
       hint =
         "collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data " +
-        "are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: " +
+        "are not in the static runtime (localeCompare orders by the CLDR root collation; Intl.Collator and locale or options arguments have no lowering) — what lowers: " +
         "number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) " +
         "for every ICU locale, option and numbering system, and Date toLocale*String and the composed " +
         "new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone";
