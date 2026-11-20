@@ -33,7 +33,7 @@ mkdir -p "$OUT"
   "$S/scr_bytes_io.c" "$S/scr_map.c" "$S/scr_closure.c" "$S/scr_object.c" \
   "$S/scr_union.c" "$S/scr_exception.c" "$S/scr_error.c" "$S/scr_console.c" \
   "$S/scr_lib.c" "$S/scr_path.c" "$S/scr_json.c" "$S/scr_async.c" \
-  "$S/scr_child.c" "$S/scr_cycle.c" "$S/scr_random_fill.c" \
+  "$S/scr_child.c" "$S/scr_cycle.c" "$S/scr_random_fill.c" "$S/scr_pool.c" "$S/scr_crypto_async.c" \
   "$S/scr_stack_margin.c" "$S/scr_win.c" \
   -ladvapi32 -liphlpapi -lws2_32 -o "$OUT/corodepth.exe" 2>/dev/null
 

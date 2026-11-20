@@ -12,7 +12,7 @@ const srcDir = join(testDir, "../src");
 // A deferred call that carries arguments is a zero-argument closure that
 // CAPTURED them, so its whole ownership story is the capture box's. This
 // binary supplies its own deferral queue — scr_random_fill.c needs exactly
-// one runtime symbol beyond the bytes core — so the primitive compiles
+// two runtime symbols beyond the bytes core (the deferral entry point and the worker pool's submit) — so the primitive compiles
 // against nothing else and a failure can only mean randomFill is wrong.
 // The counters are read after each of the three moments where a mistake
 // would be silent: the deferral fires, it never fires (the loop's teardown
@@ -37,6 +37,7 @@ test("deferred calls own their arguments: fired, torn down, and the throwing enq
     join(srcDir, "scr_error.c"),
     join(srcDir, "scr_exception.c"),
     join(srcDir, "scr_object.c"),
+    join(srcDir, "scr_stack_margin.c"),
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE", "-lm"] : []),
   ]);
   const { stderr } = await execFileAsync(bin);
