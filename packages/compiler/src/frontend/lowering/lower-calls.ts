@@ -16235,7 +16235,24 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
     const loc = locOf(call);
     const recv = L.lowerExprExpecting(call.arguments[0]!, DYN);
     const args = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, DYN));
-    const arr: IrExpr = { kind: "libCall", fn: "arrlike.from", args: [recv], type: DYN, loc };
+    // A READ-ONLY method whose callback (if any) cannot observe the array argument may run on a COPY of an array-like (a string, a plain
+    // object with `length` and dense indices): the copy is exact. A mutator, or a callback that could read its third (fourth, for reduce)
+    // parameter, keeps scr_arrlike_from, whose receivers are the ones that are shared or elements-only.
+    const name = borrowed.name.text;
+    const arrayArgAt = name === "reduce" || name === "reduceRight" ? 3 : 2;
+    const cb = call.arguments[1];
+    const callbackSafe = (): boolean => {
+      if (cb === undefined) return false;
+      let f: ts.Expression = cb;
+      while (ts.isParenthesizedExpression(f)) f = f.expression;
+      if (!ts.isArrowFunction(f) && !ts.isFunctionExpression(f)) return false;
+      return f.parameters.length <= arrayArgAt && !f.parameters.some((p) => p.dotDotDotToken !== undefined) &&
+        !(ts.isFunctionExpression(f) && /\barguments\b/.test(f.body.getText()));
+    };
+    const READ_NO_CB = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "at"]);
+    const READ_CB = new Set(["map", "filter", "forEach", "some", "every", "reduce", "reduceRight", "find", "findIndex", "findLast", "findLastIndex"]);
+    const readOnly = READ_NO_CB.has(name) || (READ_CB.has(name) && callbackSafe());
+    const arr: IrExpr = { kind: "libCall", fn: readOnly ? "arrlike.fromRead" : "arrlike.from", args: [recv], type: DYN, loc };
     return { kind: "dynInvoke", recv: arr, method: borrowed.name.text, calleeName: borrowed.getText(), args, type: DYN, loc };
   }
 

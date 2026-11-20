@@ -10621,6 +10621,7 @@ bool scr_dyn_obj_is_strdec(const ScrDyn *d);
 ScrDyn *scr_strdec_obj_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what);
 ScrDyn *scr_strdec_obj_last(ScrDyn *recv, const char *key);
 ScrDyn *scr_arrlike_from(const ScrDyn *v);
+ScrDyn *scr_arrlike_from_read(const ScrDyn *v);
 void scr_strdec_state_info(const ScrStr *enc, double pending, size_t *need, size_t *total, uint8_t last[4]);
 double scr_strdec_next(const ScrStr *enc, double pending, const ScrBytes *chunk);
 ScrStr *scr_strdec_end(const ScrStr *enc, double pending);

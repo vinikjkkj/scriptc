@@ -9322,6 +9322,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // Array.prototype.<m>.call(recv): the array-like a generic method reads (+1).
           case "arrlike.from":
             return finish(`scr_arrlike_from(${arg(0)})`);
+          case "arrlike.fromRead":
+            return finish(`scr_arrlike_from_read(${arg(0)})`);
           // The Number statics (scr_lib.c): pure f64 → bool, never throw.
           case "number.isFinite":
             return finish(`scr_num_is_finite(${arg(0)})`);

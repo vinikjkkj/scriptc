@@ -1,0 +1,20 @@
+// Array.prototype.<read>.call over a string and a plain array-like object reads its elements like Node (a copy is exact for read-only methods).
+const str = "héllo";
+const like: ArrayLike<number> = { length: 3, 0: 10, 1: 20, 2: 30 };
+const words: ArrayLike<string> = { length: 2, 0: "ab", 1: "cd" };
+console.log(Array.prototype.slice.call(str).join("|"), Array.prototype.slice.call(str, 1, 3).join("|"), Array.prototype.slice.call(like).join(","), Array.prototype.slice.call(like, 1).join(","));
+console.log(Array.prototype.indexOf.call(str, "l"), Array.prototype.lastIndexOf.call(str, "l"), Array.prototype.includes.call(str, "é"), Array.prototype.includes.call(like, 20), Array.prototype.indexOf.call(like, 30));
+console.log(Array.prototype.join.call(str, "-"), Array.prototype.join.call(like, "+"), Array.prototype.join.call(words), Array.prototype.at.call(like, -1), Array.prototype.at.call(str, 1));
+console.log(Array.prototype.map.call(str, (c: string) => c.toUpperCase()).join(""), Array.prototype.map.call(like, (x: number, i: number) => x + i).join(","));
+console.log(Array.prototype.filter.call(like, (x: number) => x > 10).join(","), Array.prototype.filter.call(str, (c: string) => c !== "l").join(""));
+const seen: string[] = [];
+Array.prototype.forEach.call(words, (w: string, i: number) => { seen.push(i + w); });
+console.log(seen.join());
+console.log(Array.prototype.reduce.call(like, (a: any, x: any) => a + x, 0), Array.prototype.reduceRight.call(str, (a: any, c: any) => a + c, ""));
+console.log(Array.prototype.some.call(like, (x: number) => x === 20), Array.prototype.every.call(like, (x: number) => x > 10), Array.prototype.find.call(like, (x: number) => x > 15), Array.prototype.findIndex.call(str, (c: string) => c === "l"));
+const emptyLike: ArrayLike<number> = { length: 0 };
+console.log(Array.prototype.slice.call(emptyLike).length, Array.prototype.join.call(emptyLike, "x") === "");
+const real = [1, 2, 3];
+Array.prototype.push.call(real, 4);
+console.log(real.join(), Array.prototype.slice.call(real, 2).join(), Array.prototype.map.call(real, (x: number) => x * 2).join());
+console.log(Array.prototype.slice.call(new Uint8Array([7, 8, 9])).join());

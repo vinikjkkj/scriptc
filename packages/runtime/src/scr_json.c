@@ -5491,6 +5491,56 @@ ScrDyn *scr_arrlike_from(const ScrDyn *v) {
   return scr_dyn_new_arr();
 }
 
+/* The READ-ONLY twin of scr_arrlike_from: `Array.prototype.<read>.call(recv, ...)` where the method only reads the
+ * receiver and hands the callback no reference to it, so a COPY of the array-like is exact. Beyond scr_arrlike_from's
+ * receivers it reads a string (one element per UTF-16 unit) and a plain object's array-like shape (`length` and the
+ * dense `"0".."length-1"` members, own or inherited). An object with a missing index in range keeps the loud gap: a
+ * hole is not an undefined element (map/forEach skip it) and the copy has no way to say so. */
+ScrDyn *scr_arrlike_from_read(const ScrDyn *v) {
+  if (v->kind == SCR_DYN_STR) {
+    ScrStr *s = (ScrStr *)v->v.str;
+    double n = scr_str_utf16_len(s);
+    ScrDyn *d = scr_dyn_new_arr();
+    for (double i = 0; i < n; i++) {
+      ScrStr *c = scr_str_char_at(s, i);
+      ScrDyn *e = scr_dyn_new_str(c);
+      scr_str_release(c);
+      scr_dyn_arr_push(d, e);
+    }
+    return d;
+  }
+  if (v->kind == SCR_DYN_OBJ) {
+    const ScrDyn *len = scr_dyn_obj_data_get(v, "length", 6);
+    double n = 0;
+    bool ok = true;
+    if (len != NULL) {
+      if (len->kind == SCR_DYN_NUM) {
+        n = len->v.num;
+        n = isnan(n) || n <= 0 ? 0 : floor(n);
+        if (n > 16777216.0) ok = false;
+      } else {
+        ok = false; /* ToLength of a non-number runs ToPrimitive: keep the gap */
+      }
+    }
+    if (ok) {
+      ScrDyn *d = scr_dyn_new_arr();
+      for (double i = 0; i < n; i++) {
+        char key[32];
+        int kl = snprintf(key, sizeof key, "%.0f", i);
+        const ScrDyn *item = scr_dyn_obj_data_get(v, key, (size_t)kl);
+        if (item == NULL) {
+          scr_dyn_release(d);
+          ok = false;
+          break;
+        }
+        scr_dyn_arr_push(d, scr_dyn_retain((ScrDyn *)item));
+      }
+      if (ok) return d;
+    }
+  }
+  return scr_arrlike_from(v);
+}
+
 /* ── class instances in the checked-dynamic tree (SCR_DYN_OBJINST) ────
  * The whole kind is five functions, and that is the point: the box
  * CARRIES an instance and hands it back, and every question that would

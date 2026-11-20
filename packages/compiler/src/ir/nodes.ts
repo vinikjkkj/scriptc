@@ -6870,6 +6870,7 @@ export type IrLibFn =
   | "strdec.end"
   | "strdec.encOf"
   | "arrlike.from"
+  | "arrlike.fromRead"
   /** node:readline's question/close slice (scr_readline.c, linked under
    * the events gate — these fns imply moduleUsesProcessEvents). The
    * interface value is an f64 handle (the Timeout-id precedent).
@@ -15964,6 +15965,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "strdec.encOf",
   // Array.prototype.<m>.call(recv): the array-like copy; null/undefined throw.
   "arrlike.from",
+  "arrlike.fromRead",
   "fs.readStream",
   "fs.readStreamOpts",
   "fs.writeStreamOpts",
