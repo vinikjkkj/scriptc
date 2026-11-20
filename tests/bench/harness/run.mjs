@@ -9,12 +9,12 @@ import { readFileSync, writeFileSync, mkdirSync, statSync, copyFileSync } from '
 import { createHash } from 'node:crypto'
 const W = process.env.BENCH_WORK, ROOT = process.env.BENCH_DIR, NODE = process.env.BENCH_NODE || 'node', TREE = process.env.TREE
 const args = process.argv.slice(2)
-let store = 'memory', out = 'out', reps = 3, withNode = false, smaps = false, irMsgs = 0, massifMsgs = 0
+let store = 'memory', out = 'out', reps = 3, withNode = false, smaps = false, irMsgs = 0, massifMsgs = 0, perf = false
 const arms = []
 for (let i = 0; i < args.length; i++) {
   const a = args[i]
   if (a === '--store') store = args[++i]; else if (a === '--out') out = args[++i]; else if (a === '--reps') reps = Number(args[++i])
-  else if (a === '--node') withNode = true; else if (a === '--smaps') smaps = true; else if (a === '--ir') irMsgs = Number(args[++i]); else if (a === '--massif') massifMsgs = Number(args[++i])
+  else if (a === '--node') withNode = true; else if (a === '--smaps') smaps = true; else if (a === '--ir') irMsgs = Number(args[++i]); else if (a === '--massif') massifMsgs = Number(args[++i]); else if (a === '--perf') perf = true
   else arms.push(a)
 }
 mkdirSync(out, { recursive: true })
@@ -38,7 +38,7 @@ function one(label, cmd, rep) {
   writeFileSync(`${out}/${label}.${rep}.stdout.txt`, stdout)
   writeFileSync(`${out}/${label}.${rep}.stderr.txt`, r.stderr.toString().slice(-20000))
   let pm = null; try { pm = JSON.parse(readFileSync(pj, 'utf8')) } catch {}
-  const run = { label, rep, exit: pm ? pm.exit : r.status, rss_peak_kb: pm?.rss_peak_kb ?? null, cpu_self_ms: pm?.cpu_self_ms ?? null, wall_ms: pm?.wall_ms ?? null, parity_md5: mask(scenarios(stdout)) }
+  const run = { label, rep, exit: pm ? pm.exit : r.status, rss_peak_kb: pm?.rss_peak_kb ?? null, cpu_self_ms: pm?.cpu_self_ms ?? null, cpu_ru_ms: pm?.cpu_ru_ms ?? null, wall_ms: pm?.wall_ms ?? null, parity_md5: mask(scenarios(stdout)) }
   results.runs.push(run)
   return run
 }
@@ -69,6 +69,13 @@ if (irMsgs > 0) for (const a of arms) {
   const r = spawnSync('valgrind', ['--tool=callgrind', `--callgrind-out-file=${cg}`, `${out}/cg/prog`], { cwd: TREE, env, maxBuffer: 1 << 28, timeout: 3 * 3600e3 })
   const m = /Collected\s*:\s*(\d+)/.exec(r.stderr.toString())
   results.ir[label] = m ? Number(m[1]) : null
+}
+// --perf: one `perf record` (self samples, no call graph) per arm and for the Node arm, over the same full run as the timed reps; report.mjs prints the top leaves.
+if (perf) for (const a of all) {
+  const label = a.split(':')[0]; resetdb()
+  const cmd = label === 'node' ? [NODE, '--import', 'tsx', entry] : [bin(a)]
+  const r = spawnSync('perf', ['record', '-F', '999', '-o', `${out}/${label}.perf.data`, '--', ...cmd], { cwd: TREE, env: envFor(), maxBuffer: 1 << 28, timeout: 3600e3 })
+  writeFileSync(`${out}/${label}.perf.stderr.txt`, (r.stderr || '').toString().slice(-4000))
 }
 if (massifMsgs > 0) for (const a of arms) {
   const label = a.split(':')[0]; resetdb()
