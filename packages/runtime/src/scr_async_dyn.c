@@ -897,6 +897,16 @@ ScrDyn *scr_promise_reason_dyn(const ScrPromise *p) {
     void *v = scr_promise_payload_ref((ScrPromise *)p);
     if (v == NULL) return scr_dyn_new_obj();
     if (scr_promise_payload_is_dyn(p)) return (ScrDyn *)v; /* retained */
+    {
+      /* A typed payload (record, array, class instance, function) whose throw site registered a converter reads as its dyn value. */
+      ScrDyn *(*conv)(void *) = (ScrDyn * (*)(void *)) scr_promise_payload_todyn_fn(p);
+      if (conv != NULL) {
+        ScrDyn *cd = conv(v);
+        scr_promise_payload_release(p, v);
+        if (cd != NULL) return cd;
+        return scr_dyn_new_obj();
+      }
+    }
     ScrDyn *d = scr_dyn_new_obj();
     /* release the generic +1 the accessor took */
     scr_promise_payload_release(p, v);
