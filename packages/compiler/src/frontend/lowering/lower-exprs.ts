@@ -6996,7 +6996,9 @@ export function callOnlyThisReceiverType(L: Lowerer, o: ts.Node): IrType | null 
     }
     // A string-typed operand compared with undefined: the ABSENT string (a regex capture group that did not participate, a
     // split capture) is the one string that IS undefined; null never equals a string.
-    if (other.type.kind === "string" && unit.unit === "undefined") {
+    // (Not through a checked narrowing bridge: a bridge extracts the dyn or union slot as a string and THROWS on its undefined, so the test
+    // belongs to the rungs above and to the dyn-width reads, not to the extracted string.)
+    if (other.type.kind === "string" && unit.unit === "undefined" && !(other.kind === "call" && other.narrowBridge === true)) {
       const test: IrExpr = { kind: "libCall", fn: "str.isAbsent", args: [other], type: BOOL, loc };
       return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
     }
@@ -7154,11 +7156,6 @@ export function callOnlyThisReceiverType(L: Lowerer, o: ts.Node): IrType | null 
         loc,
       };
     }
-    if (other.type.kind === "string") {
-      // `s == null` on a string-typed operand: only the ABSENT string (an undefined regex/split capture) is nullish.
-      const test: IrExpr = { kind: "libCall", fn: "str.isAbsent", args: [other], type: BOOL, loc };
-      return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
-    }
     if (other.type.kind === "jsval" || other.type.kind === "void") {
       return null; // no static tag to test — keep the fence
     }
@@ -7207,6 +7204,13 @@ export function callOnlyThisReceiverType(L: Lowerer, o: ts.Node): IrType | null 
           };
         }
       }
+    }
+    // (After every rung above: an index-signature read and a narrowing bridge hold a slot that can be undefined, and extracting it as a string
+    // would throw on it. What reaches here is a plain string, whose one nullish value is the ABSENT string.)
+    if (other.type.kind === "string" && !(other.kind === "call" && other.narrowBridge === true)) {
+      // `s == null` on a string-typed operand: only the ABSENT string (an undefined regex/split capture) is nullish.
+      const test: IrExpr = { kind: "libCall", fn: "str.isAbsent", args: [other], type: BOOL, loc };
+      return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
     }
     // A non-nullable operand (tsc allows the comparison as a guard):
     // `== null` is statically false, `!= null` statically true. The operand
