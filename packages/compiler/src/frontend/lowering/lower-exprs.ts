@@ -18388,6 +18388,15 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
         (narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string" ||
           narrowed.kind === "object" ||
           (narrowed.kind === "dyn" && isJsSourceFile(expr.getSourceFile())));
+      // `(e as {code?: string}).code`: the cast is erased in Node, the member read answers whatever the payload has (undefined for a
+      // primitive, a TypeError for null / undefined). The receiver of a member read is the payload's dyn value and the read goes through
+      // the dyn keyed read, never a checked cast of the payload to the record.
+      let paren: ts.Node = expr;
+      while (ts.isParenthesizedExpression(paren.parent)) paren = paren.parent;
+      const memberRecv =
+        (ts.isPropertyAccessExpression(paren.parent) || ts.isElementAccessExpression(paren.parent)) &&
+        (paren.parent as ts.PropertyAccessExpression | ts.ElementAccessExpression).expression === paren;
+      if (!bridged && memberRecv && narrowed?.kind === "dyn") return L.lowerExpr(expr.expression);
       if (!bridged) L.unsupported("SC1063", expr);
     }
     const inner = L.lowerExpr(expr.expression);
