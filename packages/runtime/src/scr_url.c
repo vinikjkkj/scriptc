@@ -249,6 +249,126 @@ static ScrStr *parse_rooted_path(const char *raw, size_t len, bool special) {
 
 /* Parses `authority` (between the slashes and the path/query/fragment):
  * [userinfo@]host[:port]. Returns false (throws) on invalid input. */
+/* ── IPv6 hosts (WHATWG URL §3.3-3.4) ────────────────────────────────────
+ * `[...]` between the brackets parses into eight 16-bit pieces (`::` compression, a trailing dotted IPv4) and serializes canonically:
+ * lowercase hex without leading zeros, the first longest run of two or more zero pieces compressed to `::`. */
+static int url_hex_val(unsigned char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+/* s[0..n) is the text BETWEEN the brackets. On success appends "[canonical]" to `out`. */
+static bool url_ipv6_canon(const char *s, size_t n, UrlBuf *out) {
+  unsigned addr[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  int piece = 0, compress = -1;
+  size_t p = 0;
+  if (n > 0 && s[0] == ':') {
+    if (n < 2 || s[1] != ':') return false;
+    p += 2;
+    piece++;
+    compress = piece;
+  }
+  while (p < n) {
+    if (piece == 8) return false;
+    if (s[p] == ':') {
+      if (compress != -1) return false;
+      p++;
+      piece++;
+      compress = piece;
+      continue;
+    }
+    unsigned value = 0;
+    size_t len = 0;
+    while (len < 4 && p < n && url_hex_val((unsigned char)s[p]) >= 0) {
+      value = value * 16 + (unsigned)url_hex_val((unsigned char)s[p]);
+      p++;
+      len++;
+    }
+    if (p < n && s[p] == '.') {
+      if (len == 0) return false;
+      p -= len;
+      if (piece > 6) return false;
+      int seen = 0;
+      while (p < n) {
+        int v4 = -1;
+        if (seen > 0) {
+          if (s[p] == '.' && seen < 4) p++;
+          else return false;
+        }
+        if (p >= n || s[p] < '0' || s[p] > '9') return false;
+        while (p < n && s[p] >= '0' && s[p] <= '9') {
+          int num = s[p] - '0';
+          if (v4 == -1) v4 = num;
+          else if (v4 == 0) return false;
+          else v4 = v4 * 10 + num;
+          if (v4 > 255) return false;
+          p++;
+        }
+        addr[piece] = addr[piece] * 0x100 + (unsigned)v4;
+        seen++;
+        if (seen == 2 || seen == 4) piece++;
+      }
+      if (seen != 4) return false;
+      break;
+    } else if (p < n && s[p] == ':') {
+      p++;
+      if (p >= n) return false;
+    } else if (p < n) {
+      return false;
+    }
+    addr[piece] = value;
+    piece++;
+  }
+  if (compress != -1) {
+    int swaps = piece - compress;
+    piece = 7;
+    while (piece != 0 && swaps > 0) {
+      unsigned t = addr[compress + swaps - 1];
+      addr[compress + swaps - 1] = addr[piece];
+      addr[piece] = t;
+      piece--;
+      swaps--;
+    }
+  } else if (piece != 8) {
+    return false;
+  }
+  /* serialize: the first longest zero run of length > 1 */
+  int best = -1, best_len = 0;
+  for (int i = 0; i < 8;) {
+    if (addr[i] != 0) {
+      i++;
+      continue;
+    }
+    int j = i;
+    while (j < 8 && addr[j] == 0) j++;
+    if (j - i > best_len) {
+      best = i;
+      best_len = j - i;
+    }
+    i = j;
+  }
+  if (best_len < 2) best = -1;
+  ub_push(out, '[');
+  bool ignore0 = false;
+  for (int i = 0; i < 8; i++) {
+    if (ignore0 && addr[i] == 0) continue;
+    if (ignore0) ignore0 = false;
+    if (best == i) {
+      ub_append(out, i == 0 ? "::" : ":", i == 0 ? 2 : 1);
+      ignore0 = true;
+      continue;
+    }
+    char hx[8];
+    int hl = snprintf(hx, sizeof hx, "%x", addr[i]);
+    ub_append(out, hx, (size_t)hl);
+    if (i != 7) ub_push(out, ':');
+  }
+  ub_push(out, ']');
+  return true;
+}
+
 static bool parse_authority(const char *raw, size_t len, bool special, bool is_file,
                             const char *scheme, size_t scheme_len,
                             ScrStr **userinfo, ScrStr **host, ScrStr **port) {
@@ -275,16 +395,35 @@ static bool parse_authority(const char *raw, size_t len, bool special, bool is_f
   *userinfo = ub_take(&ub);
   const char *hp = at >= 0 ? raw + at + 1 : raw;
   size_t hp_len = at >= 0 ? len - (size_t)at - 1 : len;
-  /* host[:port] — no IPv6 ('[' rejected below). */
+  /* host[:port]; an IPv6 host is the bracketed text, and its colons are not the port's. */
   long colon = -1;
-  for (size_t i = 0; i < hp_len; i++) {
-    if (hp[i] == ':') colon = (long)i;
-  }
-  size_t host_len = colon >= 0 ? (size_t)colon : hp_len;
-  /* Validate + lowercase (special) the host. Divergence: non-ASCII and
-   * %-escapes (IDNA territory) and IPv6 are rejected outright. */
   UrlBuf hb;
   ub_init(&hb);
+  bool v6 = hp_len > 0 && hp[0] == '[';
+  size_t host_len;
+  if (v6) {
+    size_t rb = 1;
+    while (rb < hp_len && hp[rb] != ']') rb++;
+    if (rb >= hp_len || !url_ipv6_canon(hp + 1, rb - 1, &hb)) {
+      free(hb.data);
+      return false;
+    }
+    if (rb + 1 < hp_len) {
+      if (hp[rb + 1] != ':') {
+        free(hb.data);
+        return false;
+      }
+      colon = (long)(rb + 1);
+    }
+    host_len = 0; /* the host is already serialized */
+  } else {
+    for (size_t i = 0; i < hp_len; i++) {
+      if (hp[i] == ':') colon = (long)i;
+    }
+    host_len = colon >= 0 ? (size_t)colon : hp_len;
+  }
+  /* Validate + lowercase (special) the host. Divergence: non-ASCII and
+   * %-escapes (IDNA territory) are rejected outright. */
   for (size_t i = 0; i < host_len; i++) {
     unsigned char c = (unsigned char)hp[i];
     if (c >= 0x80 || c == '%' || c == '[' || c == ']' || c <= 0x20 || c == '#' || c == '/' ||
@@ -709,8 +848,7 @@ ScrStr *scr_url_host(ScrUrl *u) {
 }
 
 /* WHATWG hostname getter: the stored port-less host verbatim ("" for
- * authority-less URLs). Node would keep IPv6 brackets here; the parser
- * rejects IPv6 hosts (documented divergence), so none reach this getter. */
+ * authority-less URLs). An IPv6 host keeps its brackets, as Node's does. */
 ScrStr *scr_url_hostname(ScrUrl *u) { return scr_str_retain(u->host); }
 
 ScrStr *scr_url_href(ScrUrl *u) {
@@ -1165,6 +1303,14 @@ static void url_query_changed(ScrUrl *u) {
 static bool url_parse_host(const char *hp, size_t host_len, bool special, bool is_file, ScrStr **out) {
   UrlBuf hb;
   ub_init(&hb);
+  if (host_len > 0 && hp[0] == '[') {
+    if (hp[host_len - 1] != ']' || !url_ipv6_canon(hp + 1, host_len - 2, &hb)) {
+      free(hb.data);
+      return false;
+    }
+    *out = ub_take(&hb);
+    return true;
+  }
   for (size_t i = 0; i < host_len; i++) {
     unsigned char c = (unsigned char)hp[i];
     if (c >= 0x80 || c == '%' || c == '[' || c == ']' || c <= 0x20 || c == '#' || c == '/' ||
@@ -1324,7 +1470,11 @@ void scr_url_set_part(ScrUrl *u, double part, ScrStr *value) {
       while (end < in.len && in.data[end] != '/' && in.data[end] != '?' && in.data[end] != '#' &&
              !(special && in.data[end] == '\\')) end++;
       size_t colon = end;
-      for (size_t i = 0; i < end; i++) {
+      size_t scan_from = 0;
+      if (end > 0 && in.data[0] == '[') {
+        while (scan_from < end && in.data[scan_from] != ']') scan_from++;
+      }
+      for (size_t i = scan_from; i < end; i++) {
         if (in.data[i] == ':') {
           colon = i;
           break;
