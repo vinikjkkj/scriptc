@@ -22,7 +22,7 @@ const srcDir = join(testDir, "../src");
 const SOURCES = [
   "scr_map.c", "scr_array.c", "scr_string.c", "scr_number.c", "scr_cycle.c",
   "scr_exception.c", "scr_error.c", "scr_object.c", "scr_union.c", "scr_closure.c",
-  "scr_lib.c", "scr_console.c", "scr_json.c", "scr_async.c", "scr_child.c", "scr_bytes.c",
+  "scr_lib.c", "scr_console.c", "scr_json.c", "scr_async.c", "scr_pool.c", "scr_bytes_io.c", "scr_child.c", "scr_bytes.c",
 ].map((f) => join(srcDir, f));
 
 test("a cycle through a Set's element is collected", async () => {
