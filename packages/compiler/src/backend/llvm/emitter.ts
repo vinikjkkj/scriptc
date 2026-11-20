@@ -2674,6 +2674,7 @@ class LlEmitter {
       this.mod.functions.some((f) => f.async === true || f.generator !== undefined) ||
       moduleCreatesPromises(this.mod) ||
       moduleBoxesProcStream(this.mod) ||
+      moduleUsesEngineFn(this.mod) ||
       usesIsland;
     const uncaughtReleases = entryMayThrow && !asyncEntry ? globalReleaseLines("gu") : [];
     const loopReleasesU = runsLoop ? globalReleaseLines("gl") : [];
