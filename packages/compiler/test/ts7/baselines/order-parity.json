@@ -17893,6 +17893,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26160-a-static-match-row-keeps-index-input-groups-and-undefined-captures-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26160-a-static-match-row-keeps-index-input-groups-and-undefined-captures-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26161-a-this-typed-function-called-with-call-writes-through-its-receiver-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26161-a-this-typed-function-called-with-call-writes-through-its-receiver-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26162-to-locale-case-with-a-locale-on-a-typed-string-maps-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26162-to-locale-case-with-a-locale-on-a-typed-string-maps-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26163-an-invalid-regexp-pattern-throws-the-syntax-error-text-v8-words-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26163-an-invalid-regexp-pattern-throws-the-syntax-error-text-v8-words-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26164-typed-string-search-and-match-with-a-string-pattern-build-a-regexp-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26164-typed-string-search-and-match-with-a-string-pattern-build-a-regexp-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26165-a-function-replacer-with-offset-subject-groups-and-optional-captures-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26165-a-function-replacer-with-offset-subject-groups-and-optional-captures-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26166-greek-upper-case-treats-the-lunate-epsilon-symbol-as-a-vowel-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26166-greek-upper-case-treats-the-lunate-epsilon-symbol-as-a-vowel-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26167-locale-compare-with-literal-locales-and-options-orders-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26167-locale-compare-with-literal-locales-and-options-orders-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2617-enum-static-field-import/main.ts": {
    "order": [
     "<repo>/tests/corpus/2617-enum-static-field-import/a.ts",
