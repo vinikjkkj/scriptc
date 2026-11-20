@@ -8381,6 +8381,8 @@ typedef struct ScrDynJsvalOps {
   /* `delete o[k]` in the ENGINE (the property goes from the REAL engine object, aliasing preserved): 1 = the engine answered true, 0 = false
    * (a non-configurable own property), -1 = the engine threw (bridged, pending). */
   int (*key_delete)(ScrJsval *cell, const ScrStr *k);
+  /* `cell instanceof <built-in error class kind>` in the ENGINE (kind: the scr_error_vts index; the engine's own constructor of that name; false when it has none). */
+  bool (*err_instanceof)(ScrJsval *cell, int kind);
 #ifdef SCR_SYMTAB
   /* A symbol-keyed operation on the ENGINE object (scr_symbol.c routes here, ScrDsymEngineOp): the runtime symbol `k`
    * crosses as THE engine symbol of its identity (one per identity, both directions: scr_island.c's table). +1 result, or

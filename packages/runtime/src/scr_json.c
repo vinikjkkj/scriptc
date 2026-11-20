@@ -16098,17 +16098,15 @@ bool scr_dyn_err_instanceof(const ScrDyn *d, double kind) {
    * its own vtable position is what `instanceof` reads, exactly as for the
    * error encoding below. */
   if (d->kind == SCR_DYN_OBJINST) return scr_dyn_class_ops != NULL && scr_dyn_class_ops->error_instanceof(d, (int)kind);
-  /* A JSVAL node never came from a runtime ScrError, so the cache miss
-   * below answers false — the documented contract ("a dyn value that
-   * never came from an error answers false"). An ENGINE TypeError held
-   * in 'unknown' thus answers false where Node answers true: covered by
-   * lane dom-jsval-long-tail (needs the engine's class instanceof). */
+  /* A JSVAL node never came from a runtime ScrError, so the cache miss below cannot answer for it: the engine's own instanceof does. */
   const size_t at = scr_errdyn_find(scr_errdyn_ix_dyn, d, false);
   if (at != SIZE_MAX) {
     const ScrVt *vt = scr_errdyn_cache[at].err->vt;
     int k = (int)kind;
     return scr_error_vts[k].pre <= vt->pre && vt->pre <= scr_error_vts[k].post;
   }
+  /* An ENGINE error held in 'unknown': the engine's own instanceof against its constructor of that name. */
+  if (d->kind == SCR_DYN_JSVAL) return scr_dyn_jsval_ops()->err_instanceof(d->v.jsval.cell, (int)kind);
   return false;
 }
 

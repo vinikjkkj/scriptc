@@ -1673,6 +1673,26 @@ static bool isl_dynjs_strict_eq(ScrJsval *a, ScrJsval *b) {
    * answers false — strict equality itself cannot throw in JS). */
   return scr_jsval_cmp(SCR_JSOP_EQ, a, b) == 1;
 }
+static bool isl_dynjs_err_instanceof(ScrJsval *cell, int kind) {
+  static const char *const names[] = {"Error", "TypeError", "RangeError", "SyntaxError", "DOMException", "ReferenceError", "AggregateError"};
+  if (kind < 0 || kind >= (int)(sizeof names / sizeof names[0])) return false;
+  isl_entry();
+  JSValue g = JS_GetGlobalObject(isl_ctx);
+  JSValue ctor = JS_GetPropertyStr(isl_ctx, g, names[kind]);
+  JS_FreeValue(isl_ctx, g);
+  bool r = false;
+  if (JS_IsFunction(isl_ctx, ctor)) {
+    int b = JS_IsInstanceOf(isl_ctx, cell->v, ctor);
+    if (b < 0) {
+      JSValue ex = JS_GetException(isl_ctx);
+      JS_FreeValue(isl_ctx, ex);
+    } else {
+      r = b > 0;
+    }
+  }
+  JS_FreeValue(isl_ctx, ctor);
+  return r;
+}
 static bool isl_dynjs_is_array(ScrJsval *cell) { return JS_IsArray(cell->v); }
 static bool isl_dynjs_is_error(ScrJsval *cell) { return JS_IsError(cell->v); }
 
@@ -2132,6 +2152,7 @@ static const ScrDynJsvalOps isl_dynjs_ops = {
   scr_jsval_exit_bin,
   isl_dynjs_get_own_desc,
   isl_dynjs_key_delete,
+  isl_dynjs_err_instanceof,
 #ifdef SCR_SYMTAB
   isl_dynjs_sym_op,
 #endif
