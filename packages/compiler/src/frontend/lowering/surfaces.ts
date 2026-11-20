@@ -6,6 +6,7 @@
  * (ambient scriptc.d.ts / standard lib / @types/node provenance). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { isAnyElemSetType } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
 import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrParam, IrStmt, IrStrIntrinsicMethod, IrType, KEYOBJ, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, typeEquals, UNDEFINED_T, } from "../../ir/nodes.js";
 import { STR_INTRINSIC_SIGS } from "../../ir/validate.js";
@@ -1851,6 +1852,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // below this fence answers, member-or-refusal ladder, so no compile
     // fence belongs here.
     if (L.mapTypeOf(L.typeOf(recv))?.kind === "dyn") return;
+    // A dyn-flavored Set (`Set<any>` / `Set<unknown>` in TypeScript) is a dyn value: `.size` reads through the runtime keyed read.
+    if (isAnyElemSetType(L, L.typeOf(recv))) return;
     // Name the container the way the source reads: the global's name when
     // the receiver IS a stdlib global (Math, process), the dotted path for
     // a member of one (process.stdout — its TYPE text would be the useless
