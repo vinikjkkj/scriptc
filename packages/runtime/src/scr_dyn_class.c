@@ -392,7 +392,7 @@ static ScrDyn *dyn_proto_method_thunk(ScrClosure *clo, ScrDyn *const *args, size
     if (w->kind == 1) {
       r = w->row->get(recv->v.inst.o); /* the getter's value, +1 */
     } else if (w->kind == 2) {
-      const ScrDynClassMember *ds = scr_dyn_objinst_member(recv, "%dynSet", 7);
+      const ScrDynClassMember *ds = scr_dyn_objinst_meta(recv, SCR_META_DYNSET);
       if (ds == NULL || ds->call == NULL) {
         dyn_eval_fence(recv, "a property write through the prototype's setter");
       } else {
@@ -839,7 +839,7 @@ static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value
      * or a key nothing can hold, keeps the loud ladder: a write that
      * silently went nowhere is the one answer worse than a refusal (the
      * static_copy stance). */
-    const ScrDynClassMember *ds = scr_dyn_objinst_member(recv, "%dynSet", 7);
+    const ScrDynClassMember *ds = scr_dyn_objinst_meta(recv, SCR_META_DYNSET);
     if (ds != NULL && ds->call != NULL) {
       /* Writing a field `delete` removed re-creates the property at the END
        * of the key order in JS; the layout keeps declaration order, so the
@@ -918,7 +918,7 @@ static int dyn_cls_ops_delete(ScrDyn *recv, const ScrStr *key) {
      * still sees undefined, and the own-key surfaces see a removed key. */
     {
       const ScrDynClassMember *fm = scr_dyn_objinst_member(recv, key->data, key->len);
-      const ScrDynClassMember *ds = scr_dyn_objinst_member(recv, "%dynSet", 7);
+      const ScrDynClassMember *ds = scr_dyn_objinst_meta(recv, SCR_META_DYNSET);
       if (fm != NULL && fm->enumerable == 4 && ds != NULL && ds->call != NULL) {
         ScrDyn *kd = scr_dyn_new_str((ScrStr *)key);
         ScrDyn *av[2] = { kd, scr_dyn_absent() };
@@ -952,7 +952,7 @@ static int dyn_cls_ops_delete(ScrDyn *recv, const ScrStr *key) {
  * +1, or NULL when the table is not created yet. The table is an OBJ whose enumerable entries are
  * the run-time keys; its own key order is the insertion order Node uses. */
 static ScrDyn *dyn_cls_props_bag(const ScrDyn *v) {
-  const ScrDynClassMember *m = scr_dyn_objinst_member(v, "%props", 6);
+  const ScrDynClassMember *m = scr_dyn_objinst_meta(v, SCR_META_PROPS);
   if (m == NULL || m->get == NULL) return NULL;
   ScrDyn *b = m->get(v->v.inst.o); /* +1; NULL only when a read threw (none for a hidden field) */
   if (b == NULL) return NULL;

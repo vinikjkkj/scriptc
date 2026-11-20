@@ -8051,6 +8051,9 @@ const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, 
  * question that follows it (an own property shadowing a method row). scr_dyn_objinst_member is the scan then the question. */
 const ScrDynClassMember *scr_dyn_objinst_row_scan(const ScrDynClass *c, const char *k, size_t klen);
 const ScrDynClassMember *scr_dyn_objinst_row_visible(const ScrDyn *d, const ScrDynClassMember *m, const char *k, size_t klen);
+/* scr_dyn_objinst_member(d, "%props", 6) and (d, "%dynSet", 7) through a per-class cache: same answer, no scan. */
+enum { SCR_META_PROPS = 0, SCR_META_DYNSET = 1, SCR_META_COUNT = 2 };
+const ScrDynClassMember *scr_dyn_objinst_meta(const ScrDyn *d, unsigned id);
 /* Does the instance's class carry a member table at all? The gate every
  * new arm is behind: with no table nothing changes, so the whole feature
  * is additive by construction. */

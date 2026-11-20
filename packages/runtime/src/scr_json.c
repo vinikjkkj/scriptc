@@ -5996,6 +5996,43 @@ const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, 
   return scr_dyn_objinst_row_visible(d, scr_dyn_objinst_row_scan(scr_dyn_objinst_class_of(d), k, klen), k, klen);
 }
 
+/* The two synthesized rows the dyn class machinery asks of an instance on every property write and every own-shadow question (`%dynSet`,
+ * `%props`), answered from a per-class cache. scr_dyn_objinst_member(d, "%dynSet", 7) is row_visible(row_scan(class_of(d), ...)), and
+ * row_visible answers the row unchanged for a key that starts with '%', so the answer is a pure function of (class, id): the class tables are
+ * emitted `const` data nobody writes. A slot belongs to one class at a time (direct-mapped by descriptor address); a different class that hashes
+ * there takes it over, so a stale answer cannot be served. Main thread only, like the other dyn caches. */
+typedef struct {
+  const ScrDynClass *cls;
+  const ScrDynClassMember *row[SCR_META_COUNT];
+  uint8_t have; /* bit id set: row[id] is the answer for cls (NULL included, a proven miss) */
+} ScrMetaSlot;
+static ScrMetaSlot scr_meta[64];
+
+static __attribute__((noinline)) const ScrDynClassMember *scr_dyn_objinst_meta_fill(ScrMetaSlot *s, const ScrDynClass *c, unsigned id) {
+  static const char *const names[SCR_META_COUNT] = {"%props", "%dynSet"};
+  const ScrDynClassMember *row = scr_dyn_objinst_row_scan(c, names[id], strlen(names[id]));
+  if (s->cls != c) {
+    s->cls = c;
+    s->have = 0;
+  }
+  s->row[id] = row;
+  s->have |= (uint8_t)(1u << id);
+  return row;
+}
+
+const ScrDynClassMember *scr_dyn_objinst_meta(const ScrDyn *d, unsigned id) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST) return NULL;
+  const ScrDynClass *c = scr_dyn_objinst_class_of(d);
+  ScrMetaSlot *s = &scr_meta[(size_t)(((uint64_t)(uintptr_t)c * 0x9E3779B97F4A7C15ull) >> 58)];
+  if (__builtin_expect(s->cls == c && ((s->have >> id) & 1u), 1)) {
+#ifdef SCR_OBJ_PLANT_BUG
+    if (SCR_OBJ_PLANT_BUG == 12) return s->row[id ^ 1u]; /* the planted defect: the other meta row answers */
+#endif
+    return s->row[id];
+  }
+  return scr_dyn_objinst_meta_fill(s, c, id);
+}
+
 size_t scr_dyn_objinst_member_count(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJINST) return 0;
   return scr_dyn_objinst_class_of(d)->nmembers;
