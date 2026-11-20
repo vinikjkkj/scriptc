@@ -27061,7 +27061,7 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
       (L.findMethodOn(L.classes.get(receiverIr.className) ?? null, expr.name.text) ||
         findGenericMethodOn(L, L.classes.get(receiverIr.className) ?? null, expr.name.text))
     ) {
-      const unbound = lowerUnboundClassMethodValue(L, expr);
+      const unbound = lowerUnboundClassMethodValue(L, expr, undefined, true);
       if (unbound !== null) return shadowAwareMethodValue(L, expr, receiverIr.className, unbound);
       L.unsupported("SC1090", expr, `bound method references (call '${expr.name.text}' directly)`);
     }

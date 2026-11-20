@@ -22,7 +22,7 @@ import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExports
 import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, newFnCtx, own } from "./lowerer.js";
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
-import { protoContextRefusal, unboundGenericClosures, unboundMethodThunk, fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
+import { lowerUnboundClassMethodValue, protoContextRefusal, unboundGenericClosures, unboundMethodThunk, fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerDateNumArg, lowerSearchParamsNew } from "./lower-builtins.js";
 import { readFileSync } from "node:fs";
 import { requiresDynamicPackageDiag, requiresDynamicTypeDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -7034,7 +7034,29 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const proto = lowerClassPrototypeRead(L, inner);
     if (proto === null) return null;
     const why = protoContextRefusal(expr, true);
-    if (why !== null) L.unsupported("SC1090", expr, why);
+    // An EQUALITY operand whose other side is a function value (`inst.m === C.prototype.m`, `C.prototype.m === saved`): that side is the declarer's
+    // interned function, so this one must be too (the dyn prototype read carries a different closure, and the two would compare unequal).
+    const eqOtherIsFn = ((): boolean => {
+      let n: ts.Node = expr;
+      while (n.parent !== undefined && (ts.isParenthesizedExpression(n.parent) || ts.isNonNullExpression(n.parent))) n = n.parent;
+      const p = n.parent;
+      if (p === undefined || !ts.isBinaryExpression(p)) return false;
+      const op = p.operatorToken.kind;
+      if (op !== ts.SyntaxKind.EqualsEqualsEqualsToken && op !== ts.SyntaxKind.ExclamationEqualsEqualsToken &&
+          op !== ts.SyntaxKind.EqualsEqualsToken && op !== ts.SyntaxKind.ExclamationEqualsToken) return false;
+      const other = p.left === n ? p.right : p.left;
+      return L.checker.getCallSignatures(L.typeOf(other)).length > 0 && (L.typeOf(other).flags & ts.TypeFlags.Any) === 0;
+    })();
+    if (why !== null || eqOtherIsFn) {
+      // A plain METHOD of the class read as a value (`const f = C.prototype.m`): the declarer's own interned function, typed as the method is, which the
+      // dyn read cannot be (it would hand a dyn to a slot of function type). The same value `inst.m` answers when nothing below overrides it.
+      const owner = protoRootClassOf(L, expr);
+      if (owner !== null && L.findMethodOn(owner, expr.name.text) !== null) {
+        const unbound = lowerUnboundClassMethodValue(L, expr, owner, true);
+        if (unbound !== null) return unbound;
+      }
+      if (why !== null) L.unsupported("SC1090", expr, why);
+    }
     const loc = locOf(expr);
     return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) }, value: proto, type: DYN, loc };
   }

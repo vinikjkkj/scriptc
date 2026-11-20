@@ -16930,23 +16930,35 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
           // EXACT arity: the compiled ABI has no missing-argument default
           // and no variadic tail, so a short or long list keeps the fence
           // rather than silently mis-calling.
+          // A list SHORTER than the parameter list is the call JS makes with the optional suffix omitted (a default, an `x?: T`): those slots are
+          // `T | undefined` ABI unions, completed with the absent value exactly as a direct call of a function value completes them. A tail slot
+          // with no absent value keeps the fence (an exact-arity list is the unchanged case).
+          const shortTailOk =
+            argNodes !== null && fn !== null && captured.length === 0 && fn.type.kind === "func" && !fn.type.rest &&
+            argNodes.length < fn.type.params.length &&
+            fn.type.params.slice(argNodes.length).every((pt) => omittedArgFor(L, pt, locOf(call)) !== null);
           if (
             argNodes !== null &&
             fn !== null &&
             captured.length === 0 &&
             fn.type.kind === "func" &&
-            fn.type.params.length === argNodes.length
+            (fn.type.params.length === argNodes.length || shortTailOk)
           ) {
             const thisArg = L.lowerExpr(call.arguments[0]!);
-            const args = (): IrExpr[] =>
-              L.completeArgs(
+            const args = (): IrExpr[] => {
+              const given = L.completeArgs(
                 argNodes,
                 fn!.type.kind === "func"
-                  ? fn!.type.params.map((t) => ({ type: t, mode: "required" as const }))
+                  ? fn!.type.params.slice(0, argNodes.length).map((t) => ({ type: t, mode: "required" as const }))
                   : [],
                 locOf(call),
                 call,
               );
+              if (fn!.type.kind === "func") {
+                for (let i = argNodes.length; i < fn!.type.params.length; i++) given.push(omittedArgFor(L, fn!.type.params[i]!, locOf(call))!);
+              }
+              return given;
+            };
             if (!thisWindow) {
               // TypeScript: the receiver is dropped, so the call is the
               // call. `droppableStatic` is the `f.call(null, ...)` /
