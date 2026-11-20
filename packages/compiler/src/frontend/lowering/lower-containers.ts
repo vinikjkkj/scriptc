@@ -3666,6 +3666,80 @@ function lowerBytesHofCall(L: Lowerer, call: ts.CallExpression, access: ts.Prope
   return { kind: "call", callee: helper, args, type, loc };
 }
 
+/** The contexts that consume an iterator the moment it is made, with no user code between its creation and its drain (so a snapshot IS what the live
+ *  iterator yields): an element spread of an array literal, the sole argument of `Array.from`, or of a call whose slot is typed
+ *  `Iterable<T>`. The for-of subject is lowered by the statement lowering and never reaches the call lowering. */
+function isImmediateIteratorDrain(L: Lowerer, call: ts.CallExpression): boolean {
+  const parent = call.parent;
+  if (ts.isSpreadElement(parent) && ts.isArrayLiteralExpression(parent.parent)) return true;
+  if (ts.isCallExpression(parent) && parent.arguments.length === 1 && parent.arguments[0] === call) {
+    if (ts.isPropertyAccessExpression(parent.expression) && parent.expression.name.text === "from" && L.isStdlibGlobal(parent.expression.expression, "Array")) return true;
+    const ctxT = L.checker.getContextualType(call);
+    const sym = ctxT?.getSymbol();
+    if (sym !== undefined && sym.name === "Iterable") {
+      return L.checker.declarationsOf(sym).some((d) => ts.isInterfaceDeclaration(d) && L.isStdlibFile(d.getSourceFile()));
+    }
+    return false;
+  }
+  return false;
+}
+
+/** `[...x.keys()]` / `x.values()` / `x.entries()` on a typed array (every width, the bigint views too): drained where it is made into a fresh array of
+ *  the index, the element, or the interned `[number, T]` pair. One lifted helper per (method, element kind). Null when the call is not one of them. */
+function lowerBytesIterDrainCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression, bytesT: IrType & { kind: "bytes" }, loc: SrcLoc): IrExpr | null {
+  const method = access.name.text;
+  if ((method !== "keys" && method !== "values" && method !== "entries") || call.arguments.length !== 0 || bytesT.elem === "buf") return null;
+  if (!isImmediateIteratorDrain(L, call)) {
+    L.noLowering(
+      `.${method}() outside an immediate array spread`,
+      call,
+      `iterator objects have no lowering: drain it into an array where it is made ([...x.${method}()], Array.from(x.${method}())), or iterate it with for-of`,
+    );
+  }
+  const valT = bytesValueType(bytesT.elem);
+  const pairT: IrType = { kind: "record", shapeId: L.shapes.intern([{ name: "0", type: F64 }, { name: "1", type: valT }], true) };
+  const elemT: IrType = method === "keys" ? F64 : method === "values" ? valT : pairT;
+  const outT = arrayOf(elemT);
+  const receiver = L.lowerExpr(access.expression);
+  const key = `bytes.iter:${method}:${bytesT.elem}`;
+  let helper = L.arrHofHelpers.get(key);
+  if (!helper) {
+    helper = `%bytes.${method}.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, helper);
+    const ref = (localId: string, type: IrType = F64): IrExpr => ({ kind: "varRef", localId, type, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const get: IrExpr = { kind: "bytesIntrinsic", method: "get", receiver: ref("a.0", bytesT), args: [ref("i.0")], type: valT, loc };
+    const pushed: IrExpr = method === "keys" ? ref("i.0") : method === "values" ? get : { kind: "recordLit", fields: [{ name: "0", value: ref("i.0") }, { name: "1", value: get }], type: pairT, loc };
+    const lenE: IrExpr = { kind: "bytesIntrinsic", method: "length", receiver: ref("a.0", bytesT), args: [], type: F64, loc };
+    L.liftedFns.push({
+      name: helper,
+      params: [{ localId: "a.0", name: "a", type: bytesT }],
+      returnType: outT,
+      locals: [
+        { id: "a.0", name: "a", type: bytesT, mutable: false },
+        { id: "n.0", name: "n", type: F64, mutable: false },
+        { id: "out.0", name: "out", type: outT, mutable: false },
+        { id: "i.0", name: "i", type: F64, mutable: true },
+      ],
+      body: [
+        { kind: "varDecl", localId: "n.0", init: lenE, loc },
+        { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
+        {
+          kind: "for",
+          init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
+          cond: { kind: "bin", op: "<", left: ref("i.0"), right: ref("n.0"), type: BOOL, loc },
+          update: { kind: "assign", localId: "i.0", value: { kind: "bin", op: "+", left: ref("i.0"), right: num(1), type: F64, loc }, loc },
+          body: [{ kind: "exprStmt", expr: { kind: "arrIntrinsic", method: "push", receiver: ref("out.0", outT), args: [pushed], type: F64, loc }, loc }],
+          loc,
+        },
+        { kind: "return", value: ref("out.0", outT), loc },
+      ],
+      loc,
+    });
+  }
+  return { kind: "call", callee: helper, args: [receiver], type: outT, loc };
+}
+
 /** `(a, b) => ...` of the typed-array DEFAULT order over doubles: NaN after every number, -0 before +0, otherwise numeric. */
 function buildFloatDefaultCmpFn(name: string, loc: SrcLoc): IrFunction {
   const ref = (localId: string): IrExpr => ({ kind: "varRef", localId, type: F64, loc });
@@ -9225,7 +9299,7 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
       };
     }
     if (!bytesMemberDeclaredOnBuffer(L, access)) {
-      const looped = lowerBytesLoopCall(L, call, access, receiverIr, loc) ?? lowerBytesHofCall(L, call, access, receiverIr, loc);
+      const looped = lowerBytesLoopCall(L, call, access, receiverIr, loc) ?? lowerBytesIterDrainCall(L, call, access, receiverIr, loc) ?? lowerBytesHofCall(L, call, access, receiverIr, loc);
       if (looped !== null) return looped;
     }
     if (receiverIr.elem !== "buf" && name === "toSorted") {
