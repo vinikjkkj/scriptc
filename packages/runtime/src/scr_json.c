@@ -8348,6 +8348,21 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
         if (oe != NULL && oe->kind != SCR_DYN_UNDEF) scr_err_hide(d, "errors", 6, oe);
         else scr_dyn_release(oe);
       }
+      /* Every other non-enumerable own DATA property (an engine error's `secret` that crossed the boundary) moves over the same way. */
+      if (scr_dyn_ext(old)->hidden != NULL && scr_dyn_ext(old)->hidden->kind == SCR_DYN_OBJ) {
+        const ScrDyn *hid = scr_dyn_ext(old)->hidden;
+        for (size_t hi = 0; hi < hid->v.obj.len; hi++) {
+          const ScrDynEntry *he = &hid->v.obj.entries[hi];
+          if ((he->key_len == 5 && memcmp(he->key, "cause", 5) == 0) || (he->key_len == 6 && memcmp(he->key, "errors", 6) == 0)) continue;
+          if (he->value == NULL || he->value->kind != SCR_DYN_ARR || he->value->v.arr.len < 4) continue;
+          ScrDyn *const *row = he->value->v.arr.items;
+          if (row[0]->kind != SCR_DYN_BOOL || !row[0]->v.b) continue; /* data rows only */
+          ScrDyn *val = scr_dyn_obj_key_get(old, he->key, he->key_len); /* +1 */
+          if (val == NULL) continue;
+          scr_dyn_obj_define_hidden_data(d, he->key, he->key_len, val, row[2]->kind == SCR_DYN_BOOL && row[2]->v.b, row[3]->kind == SCR_DYN_BOOL && row[3]->v.b);
+          scr_dyn_release(val);
+        }
+      }
       scr_dyn_release(old);
       me->props = NULL;
     }
