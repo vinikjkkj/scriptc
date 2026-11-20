@@ -28487,6 +28487,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/node-types/worker-pool.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/worker-pool.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/npm/cases/24510-an-own-function-assigned-over-a-class-method-runs-in-its-place/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/24510-an-own-function-assigned-over-a-class-method-runs-in-its-place/main.ts"
