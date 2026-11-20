@@ -5,8 +5,9 @@
 import { storesFreshDynNumber } from "../../ir/dyn-keep.js";
 import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
+import { isErrorRootedClass } from "../dyn-members.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
-import { BOOL, CAUGHT, numSlotHalf, narrowSlotOf, narrowExtArg, classCbit, errorChainHasInferredFields, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, numSlotHalf, narrowSlotOf, narrowExtArg, classCbit, errorChainHasInferredFields, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit, throwPayloadToDyn } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, cType, elemAccess, vAdapters } from "./emit-types.js";
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 import { emitStableReceiver, predeclareFieldRunTables } from "./emit-exprs.js";
@@ -1303,6 +1304,11 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         const v = E.emitExpr(s.value);
         const t = s.value.type;
         if (isRefCounted(t)) E.moveTemp(v); // the cell takes ownership
+        // An untyped read of the catch binding converts a typed payload through its type's to-dyn converter (registered here, by retain adapter).
+        if (t.kind !== "dyn" && throwPayloadToDyn(E.mod, t, (cn) => { const m = E.classMeta.get(cn); return m === undefined || isErrorRootedClass(m); })) {
+          const rc0 = vAdapters(t);
+          E.line(`scr_exc_todyn_register((void *(*)(void *))&${rc0.retain}, (void *)&${E.toDynHelper(t)});`);
+        }
         if (t.kind === "f64") {
           E.line(`scr_throw_f64(${v.name});${E.srcComment(s.loc)}`);
         } else if (t.kind === "bool") {

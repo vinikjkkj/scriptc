@@ -3490,6 +3490,12 @@ typedef struct ScrCaught {
   ScrTraceFn trace_fn;
 } ScrCaught;
 
+/* Throw-site registration of the typed-payload to dyn converter (keyed by the payload's retain adapter), and the lookup; see scr_exception.c. */
+void scr_exc_todyn_register(void *(*retain)(void *), void *fn);
+void *scr_exc_todyn_find(void *(*retain)(void *));
+/* The converted dyn (+1) of a caught typed payload whose throw site registered a converter, or NULL. */
+ScrDyn *scr_caught_to_dyn_reg(const ScrCaught *c);
+
 ScrCaught *scr_exc_take(void); /* moves the pending cell into a fresh box (+1) */
 ScrCaught *scr_caught_retain(ScrCaught *c);
 void scr_caught_release(ScrCaught *c); /* NULL-tolerant */

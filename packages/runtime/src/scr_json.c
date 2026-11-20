@@ -8127,6 +8127,11 @@ ScrDyn *scr_error_nonerr_payload(const ScrError *e) {
   return scr_dyn_obj_get(e->props, "%nonerr", 7);
 }
 
+ScrDyn *scr_caught_to_dyn_reg(const ScrCaught *c) {
+  ScrDyn *(*fn)(void *) = (ScrDyn * (*)(void *)) scr_exc_todyn_find(c->retain_fn);
+  return fn != NULL ? fn(c->payload) : NULL;
+}
+
 ScrDyn *scr_dyn_from_error(const ScrError *e) {
   if (scr_error_is_nonerr(e)) {
     ScrDyn *pl = scr_error_nonerr_payload(e);

@@ -314,6 +314,32 @@ void scr_throw_ref(void *v, void *(*retain)(void *), void (*release)(void *),
   scr_exc_trace_fn = trace;
 }
 
+/* The typed-payload to dyn converters a throw site registered (keyed by the payload type's retain adapter, one per type). A thrown record, array or
+ * non-Error class instance is a TYPED value in the exception cell; an untyped read of the catch binding (`catch (e: any) { e.code }`) converts it
+ * through the converter of its type. Registered by the emitted throw site before the throw (idempotent), looked up by the dyn unit. */
+static struct { void *(*retain)(void *); void *fn; } *scr_todyn_tab;
+static size_t scr_todyn_len, scr_todyn_cap;
+void scr_exc_todyn_register(void *(*retain)(void *), void *fn) {
+  for (size_t i = 0; i < scr_todyn_len; i++) {
+    if (scr_todyn_tab[i].retain == retain) return;
+  }
+  if (scr_todyn_len == scr_todyn_cap) {
+    scr_todyn_cap = scr_todyn_cap == 0 ? 8 : scr_todyn_cap * 2;
+    void *nt = realloc(scr_todyn_tab, scr_todyn_cap * sizeof *scr_todyn_tab);
+    if (nt == NULL) scr_trap("scriptc: out of memory\n");
+    scr_todyn_tab = nt;
+  }
+  scr_todyn_tab[scr_todyn_len].retain = retain;
+  scr_todyn_tab[scr_todyn_len].fn = fn;
+  scr_todyn_len++;
+}
+void *scr_exc_todyn_find(void *(*retain)(void *)) {
+  for (size_t i = 0; i < scr_todyn_len; i++) {
+    if (scr_todyn_tab[i].retain == retain) return scr_todyn_tab[i].fn;
+  }
+  return NULL;
+}
+
 void *scr_exc_pending_payload(void) {
   return scr_exc_kind == SCR_EXC_OBJ ? scr_exc_payload : NULL;
 }

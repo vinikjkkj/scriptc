@@ -13605,6 +13605,53 @@ const PRIMITIVE_CTOR_FN_NAMES: ReadonlySet<string> = new Set(
   ["%builtin.", "%builtin.dyn."].flatMap((p) => ["String", "Number", "Boolean"].map((n) => p + n)),
 );
 
+/** Does any catch binding of the module convert its payload to a dyn value (a `caughtToDyn` node)? Memoized. */
+const caughtToDynMemo = new WeakMap<IrModule, boolean>();
+export function moduleUsesCaughtToDyn(mod: IrModule): boolean {
+  const hit = caughtToDynMemo.get(mod);
+  if (hit !== undefined) return hit;
+  let found = false;
+  const seen = new Set<object>();
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object" || seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if ((v as { kind?: unknown }).kind === "caughtToDyn") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) {
+      if (key === "loc" || key === "type") continue;
+      visit((v as Record<string, unknown>)[key]);
+    }
+  };
+  visit(mod.functions);
+  caughtToDynMemo.set(mod, found);
+  return found;
+}
+
+/** A thrown value of type `t` rides the exception cell as a TYPED payload (a record, array, map or set the runtime cannot read by name). When the
+ * module reads a catch binding untyped (`catch (e: any) { e.code }`, a rejection handler's reason) the throw site registers the type's to-dyn
+ * converter (scr_exc_todyn_register) so the catch converts the payload instead of answering an empty object. True when this throw registers one. */
+const throwDynMemo = new WeakMap<IrModule, { records: Map<string, IrRecordShape>; unions: Map<string, IrUnionDef> }>();
+export function throwPayloadToDyn(mod: IrModule, t: IrType, errorRooted: (className: string) => boolean): boolean {
+  // A class instance that is not Error-rooted (an Error-rooted one crosses as its own error encoding) is boxed by reference.
+  if (t.kind === "object") {
+    if (!canBoxClassIntoDyn(t.className) || errorRooted(t.className)) return false;
+  } else if (t.kind !== "record" && t.kind !== "array" && t.kind !== "map" && t.kind !== "set") return false;
+  if (!moduleUsesCaughtToDyn(mod)) return false;
+  let m = throwDynMemo.get(mod);
+  if (m === undefined) {
+    m = { records: new Map((mod.records ?? []).map((r) => [r.id, r] as const)), unions: new Map((mod.unions ?? []).map((u) => [u.id, u] as const)) };
+    throwDynMemo.set(mod, m);
+  }
+  const mm = m;
+  return canConvertToDyn(t, (id) => mm.records.get(id), (id) => mm.unions.get(id));
+}
+
 /** The program formats a Date as text (scr_date_fmt.c plus the generated ICU
  * zone-name table, ~35 KB): a date.toString/date.format libCall, or a Date
  * crossing the checked-dynamic boundary (whose handle serves the formatters at

@@ -4787,6 +4787,18 @@ export class LlDyn {
       B.line(`${r} = call ptr @scr_dyn_retain_v(ptr ${p})`);
       B.terminate(`ret ptr ${r}`);
       B.startBlock(lPlain);
+      // A typed payload whose throw site registered a converter (a thrown record, array, map or set): its dyn value.
+      host.declare(`declare ptr @scr_caught_to_dyn_reg(ptr)`);
+      const reg = B.tmp();
+      B.line(`${reg} = call ptr @scr_caught_to_dyn_reg(ptr %c)`);
+      const hasReg = B.tmp();
+      B.line(`${hasReg} = icmp ne ptr ${reg}, null`);
+      const lReg = B.newLabel("cd.g");
+      const lEmpty = B.newLabel("cd.n");
+      B.condBr(hasReg, lReg, lEmpty);
+      B.startBlock(lReg);
+      B.terminate(`ret ptr ${reg}`);
+      B.startBlock(lEmpty);
       const e = B.tmp();
       B.line(`${e} = call ptr @scr_dyn_new_obj()`);
       B.terminate(`ret ptr ${e}`);
