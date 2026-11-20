@@ -17581,6 +17581,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26130-an-unhandled-rejection-of-an-engine-promise-exits-one-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26130-an-unhandled-rejection-of-an-engine-promise-exits-one-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26131-a-handled-rejection-of-an-engine-promise-stays-silent-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26131-a-handled-rejection-of-an-engine-promise-stays-silent-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2614-trap-binding-later-writes.ts": {
    "order": [
     "<repo>/tests/corpus/2614-trap-binding-later-writes.ts"
