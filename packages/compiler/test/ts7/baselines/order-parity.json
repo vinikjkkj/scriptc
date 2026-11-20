@@ -17582,6 +17582,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26191-emitter-member-names-answer-exactly-at-the-length-boundaries.ts": {
+   "order": [
+    "<repo>/tests/corpus/26191-emitter-member-names-answer-exactly-at-the-length-boundaries.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2620-ee-override-once-order.ts": {
    "order": [
     "<repo>/tests/corpus/2620-ee-override-once-order.ts"
