@@ -198,6 +198,40 @@ void scr_asym_keypair(int curve, unsigned char priv[32], unsigned char pub[32]) 
 /* The X25519 shared secret. An all-zero result means the peer sent a
  * low-order point — Node throws for that, so the caller gets false and
  * raises. */
+
+/* LAB CENSUS (never lands): how many X25519 agreements repeat an earlier (private, public) pair, a private key, or a public key. */
+#include <stdint.h>
+#define DHC_N (1u << 18)
+static uint64_t dhc_pair[DHC_N], dhc_priv[DHC_N], dhc_pub[DHC_N];
+static unsigned long dhc_calls, dhc_u_pair, dhc_u_priv, dhc_u_pub;
+static uint64_t dhc_fnv(const unsigned char *a, int na, const unsigned char *b, int nb) {
+  uint64_t h = 1469598103934665603ULL;
+  for (int i = 0; i < na; i++) h = (h ^ a[i]) * 1099511628211ULL;
+  for (int i = 0; i < nb; i++) h = (h ^ b[i]) * 1099511628211ULL;
+  return h | 1;
+}
+static int dhc_add(uint64_t *set, uint64_t h) {
+  for (uint32_t k = (uint32_t)(h >> 20) & (DHC_N - 1);; k = (k + 1) & (DHC_N - 1)) {
+    if (set[k] == h) return 0;
+    if (set[k] == 0) { set[k] = h; return 1; }
+  }
+}
+static void dhc_dump(void) {
+  const char *p = getenv("SCR_OPDUR_OUT");
+  FILE *f = p ? fopen(p, "w") : stderr;
+  if (!f) f = stderr;
+  fprintf(f, "DHCEN calls=%lu unique_pairs=%lu unique_private_keys=%lu unique_public_keys=%lu\n", dhc_calls, dhc_u_pair, dhc_u_priv, dhc_u_pub);
+  if (f != stderr) fclose(f);
+}
+static void dhc_note(const ScrKeyObject *priv, const ScrKeyObject *pub) {
+  static int reg;
+  if (!reg) { reg = 1; atexit(dhc_dump); }
+  dhc_calls++;
+  dhc_u_pair += dhc_add(dhc_pair, dhc_fnv(priv->raw, 32, pub->raw, 32));
+  dhc_u_priv += dhc_add(dhc_priv, dhc_fnv(priv->raw, 32, 0, 0));
+  dhc_u_pub += dhc_add(dhc_pub, dhc_fnv(pub->raw, 32, 0, 0));
+}
+
 bool scr_asym_dh(unsigned char out[32], const ScrKeyObject *priv, const ScrKeyObject *pub) {
   if (priv->curve != SCR_CURVE_X25519 || pub->curve != SCR_CURVE_X25519) {
     scr_asym_throw("diffieHellman requires two X25519 keys");
@@ -207,6 +241,7 @@ bool scr_asym_dh(unsigned char out[32], const ScrKeyObject *priv, const ScrKeyOb
     scr_asym_throw("diffieHellman needs a private key and a public key");
     return false;
   }
+  dhc_note(priv, pub);
   crypto_x25519(out, priv->raw, pub->raw);
   unsigned char acc = 0;
   for (int i = 0; i < 32; i++) acc |= out[i];
