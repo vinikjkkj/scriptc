@@ -18110,6 +18110,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26311-array-is-array-of-a-computed-operand-evaluates-it-once-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26311-array-is-array-of-a-computed-operand-evaluates-it-once-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2632-dyn-jsval-iterate.js": {
    "order": [
     "<repo>/tests/corpus/2632-dyn-jsval-iterate.js"
