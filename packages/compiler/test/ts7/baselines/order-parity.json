@@ -17779,6 +17779,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26140-an-engine-built-error-answers-instanceof-for-its-own-class-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26140-an-engine-built-error-answers-instanceof-for-its-own-class-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2615-nullish-field-record-binding.ts": {
    "order": [
     "<repo>/tests/corpus/2615-nullish-field-record-binding.ts"
