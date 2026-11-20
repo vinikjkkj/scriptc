@@ -10,7 +10,7 @@ import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangl
 import { BOOL, CAUGHT, numSlotHalf, narrowSlotOf, narrowExtArg, classCbit, errorChainHasInferredFields, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit, throwPayloadToDyn } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, cType, elemAccess, vAdapters } from "./emit-types.js";
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
-import { emitStableReceiver, predeclareFieldRunTables } from "./emit-exprs.js";
+import { emitStableReceiver, predeclareFieldRunTables, recordKeyC } from "./emit-exprs.js";
 import { writesLocal } from "../../ir/analysis.js";
 import { rawReceivers } from "../../ir/f64-raw.js";
 import { coroPrologue, coroDispatch, coroFinish, coroField } from "./emit-coro.js";
@@ -1055,7 +1055,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // `delete obj[k]` on a pure index-signature shape: a Map delete on
         // the overflow (key and value released; absent keys no-op).
         const obj = E.emitExpr(s.obj);
-        const key = E.emitExpr(s.key);
+        const key = recordKeyC(E, E.emitExpr(s.key));
         E.line(`scr_map_delete_str(${obj.name}->${OVERFLOW_MEMBER}, ${key.name});${E.srcComment(s.loc)}`);
         break;
       }
@@ -1066,7 +1066,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // the value (+1 moves in). MAY THROW when a dyn value must validate
         // against a declared field's type — the pending check runs then.
         const obj = E.emitExpr(s.obj);
-        const key = E.emitExpr(s.key);
+        const key = recordKeyC(E, E.emitExpr(s.key));
         const v = E.emitExpr(s.value);
         if (isRefCounted(v.type)) E.moveTemp(v);
         // A LITERAL key naming no declared field is a plain overflow map
@@ -1655,7 +1655,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
       const t = E.emitExpr(c.test);
       const cmp =
         c.test.type.kind === "string"
-          ? `${E.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq"}(${disc.name}, ${t.name})`
+          ? `scr_str_eq(${disc.name}, ${t.name})`
           : `${disc.name} == ${t.name}`;
       const hit = E.newTemp(BOOL, cmp);
       E.releaseFrame(E.frames.pop()!);

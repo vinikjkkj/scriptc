@@ -1004,7 +1004,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       case "strEq": {
         const l = emitBorrowedLocal(E, e.left, [e.right]);
         const r = emitBorrowedLocal(E, e.right, []);
-        return E.newTemp(e.type, `${e.negated ? "!" : ""}${E.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq"}(${l.name}, ${r.name})`);
+        return E.newTemp(e.type, `${e.negated ? "!" : ""}scr_str_eq(${l.name}, ${r.name})`);
       }
       case "strCmp": {
         const l = emitBorrowedLocal(E, e.left, [e.right]);
@@ -3152,7 +3152,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // population: it only ever answers `undefined`, never throws, and
         // stays on the cheaper plain temp.
         const obj = E.emitExpr(e.obj);
-        const key = E.emitExpr(e.key);
+        const key = recordKeyC(E, E.emitExpr(e.key));
         const helper = E.recordKeyGetHelper(e.shapeId, e.type, e.overflowOnly === true);
         // SCRIPTC_RKG_COUNT: one ordinal per emitted call of a THROWING
         // keyed-read helper.  Empty text with the dial off.
@@ -3172,7 +3172,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       case "recordOvfHas": {
         // Own-key membership of the overflow map; both operands borrowed.
         const obj = E.emitExpr(e.obj);
-        const key = E.emitExpr(e.key);
+        const key = recordKeyC(E, E.emitExpr(e.key));
         return E.newTemp(e.type, `scr_map_has_str(${obj.name}->${OVERFLOW_MEMBER}, ${key.name})`);
       }
       case "recordOvfSlots": {
@@ -10479,4 +10479,11 @@ function emitAbsentMemberCheckC(E: CEmitter, recv: string, member: string): void
   E.emitPendingCheck();
   E.indent--;
   E.line(`}`);
+}
+
+/** The property key of a record in a module that can hold the absent string: `obj[x]` ToStrings its key, so the marker (Node's undefined) names the
+ * property "undefined" (the Map/Set/includes identity of scr_str_eq must not apply to a record's overflow map). One inline select. */
+export function recordKeyC(E: CEmitter, key: Temp): Temp {
+  if (E.mod.absentStrings !== true || key.type.kind !== "string") return key;
+  return { ...key, name: `(${key.name} == (ScrStr *)scr_str_absent_sentinel ? (ScrStr *)scr_str_undefined_key : ${key.name})` };
 }
