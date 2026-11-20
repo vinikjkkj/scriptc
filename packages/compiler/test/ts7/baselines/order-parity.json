@@ -17576,6 +17576,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26420-literal-pattern-replace-finds-nothing-or-something-exactly-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26420-literal-pattern-replace-finds-nothing-or-something-exactly-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/26010-sorts-are-stable-and-n-log-n-over-strings-numbers-objects-and-typed-arrays-like-node.ts": {
    "order": [
     "<repo>/tests/corpus/26010-sorts-are-stable-and-n-log-n-over-strings-numbers-objects-and-typed-arrays-like-node.ts"
