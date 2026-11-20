@@ -17954,6 +17954,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26250-url-parses-and-serializes-ipv6-hosts-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26250-url-parses-and-serializes-ipv6-hosts-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26251-console-table-prints-arrays-and-objects-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26251-console-table-prints-arrays-and-objects-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2626-stream-event-names.ts": {
    "order": [
     "<repo>/tests/corpus/2626-stream-event-names.ts"
