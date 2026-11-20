@@ -3688,6 +3688,29 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_str_release(rs);
       return d;
     }
+    /* toExponential / toPrecision: the exact-value formatters the static
+     * spelling calls. An undefined or omitted argument is the spec's
+     * shortest-digits form (toExponential) and ToString (toPrecision); an
+     * explicit one is ToIntegerOrInfinity'd and range-checked inside the
+     * formatter (V8's RangeError text). */
+    if (recv->kind == SCR_DYN_NUM && (dyn_name_is(method, "toExponential") || dyn_name_is(method, "toPrecision"))) {
+      bool expo = dyn_name_is(method, "toExponential");
+      ScrStr *rs;
+      if (argc == 0 || args[0]->kind == SCR_DYN_UNDEF) {
+        rs = expo ? scr_num_to_exponential(recv->v.num) : scr_f64_to_scrstr(recv->v.num);
+      } else {
+        double digits = dyn_index_arg(args, argc, 0, 0, what);
+        if (scr_exc_pending()) return NULL;
+        rs = expo ? scr_num_to_exponential_digits(recv->v.num, digits) : scr_num_to_precision(recv->v.num, digits);
+      }
+      if (scr_exc_pending()) {
+        if (rs) scr_str_release(rs);
+        return NULL;
+      }
+      ScrDyn *d = scr_dyn_new_str(rs);
+      scr_str_release(rs);
+      return d;
+    }
     /* valueOf falls through to dyn_object_proto_method with every other
      * kind's -- one body, one answer. */
     if ((recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BIG) && dyn_name_is(method, "toLocaleString") && dyn_locale_answerable(args, argc)) {
@@ -3696,10 +3719,6 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       ScrDyn *d = scr_dyn_new_str(s);
       scr_str_release(s);
       return d;
-    }
-    if (recv->kind == SCR_DYN_NUM && dyn_num_proto_unimpl(method)) {
-      dyn_throw_unsupported("Number", method);
-      return NULL;
     }
     return dyn_object_proto_method(recv, method, args, argc, what);
   }
