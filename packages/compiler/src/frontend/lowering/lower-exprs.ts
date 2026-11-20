@@ -28585,6 +28585,18 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
         type?.kind === "promise" ? type : { kind: "promise", inner: VOID };
       return { kind: "intrinsic", name: "promise.reject", args: [reason], type: resultT, loc };
     }
+    // A typed reason that is no Error (`Promise.reject({ code: "E1" })`, a string, a number, an array): the rejection payload is its dyn value,
+    // the thrown-dyn representation a dyn reason takes above (a catch or await reads its members like Node).
+    if (!errorRootedObjectOf(L, L.typeOf(reasonNode)) && L.dynConvertible(reason.type)) {
+      const resultD: IrType = type?.kind === "promise" ? type : { kind: "promise", inner: VOID };
+      return {
+        kind: "intrinsic",
+        name: "promise.reject",
+        args: [{ kind: "dynFrom", value: reason, type: DYN, loc }],
+        type: resultD,
+        loc,
+      };
+    }
     // An Error reason with NO context-named promise type (a bare
     // top-level `Promise.reject(new Error())` — the unhandled-rejection
     // suite's shape): the result only ever rejects, so the checker's own
