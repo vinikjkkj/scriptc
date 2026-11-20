@@ -4123,7 +4123,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // honest one, not a generic recitation about the outer dot. A
       // receiver that lowers cleanly means the MEMBER is the gap — name
       // the property and the receiver's type instead of "property access".
-      const recvLowered = L.lowerExpr(expr.expression);
+      let recvLowered = L.lowerExpr(expr.expression);
+      // A checker-`any` receiver whose lowered value is a static array/number/boolean (the result of a dyn string method that lowered
+      // statically): box it, then the keyed read below answers as it does for any dyn value.
+      if (recvLowered.type.kind !== "dyn" && (L.typeOf(expr.expression).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 &&
+          (recvLowered.type.kind === "array" || recvLowered.type.kind === "f64" || recvLowered.type.kind === "bool" || recvLowered.type.kind === "string" || recvLowered.type.kind === "union") && L.dynConvertible(recvLowered.type)) {
+        const boxed = L.coerceToExpected(recvLowered, DYN);
+        if (boxed.type.kind === "dyn") recvLowered = boxed;
+      }
       // A dyn receiver — JSON.parse's `any`, or `unknown` the checker
       // narrowed to `object` — reads through the dyn keyed read: member
       // or undefined (JS's own-property answer), throwing JS's TypeError

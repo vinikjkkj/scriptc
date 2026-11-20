@@ -1334,6 +1334,10 @@ function isAnySetDecl(L: Lowerer, node: ts.Node, t: ts.Type): boolean {
   return isAnyElemSetType(L, t);
 }
 
+function isAnyElemArrayType(L: Lowerer, t: ts.Type): boolean {
+  return L.checker.isArrayType(t) && ((L.checker.getTypeArguments(t as ts.TypeReference)[0]?.flags ?? 0) & ts.TypeFlags.Any) !== 0;
+}
+
 /** The standard library's `Set<any>` / `Set<unknown>` (TypeScript sources): the dyn-flavored Set's checker type. */
 export function isAnyElemSetType(L: Lowerer, t: ts.Type): boolean {
   const sym = t.getSymbol();
@@ -1378,6 +1382,8 @@ export function dynFallbackType(L: Lowerer, node: ts.Node, t: ts.Type): IrType |
     // A declaration whose type is a Set of any/unknown (`const s = new Set<any>()`, `visited: Set<unknown>`): the dyn-flavored Set
     // (dynMapNew) the constructor builds; its box carries the Set method table.
     if (isAnySetDecl(L, node, t)) return DYN;
+    // The RETURN slot of a function whose result is `any[]` (spelled or inferred, `() => [a, 1]`): the checked-dynamic array a spelled `any[]` slot is.
+    if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && isAnyElemArrayType(L, t)) return DYN;
     // TS single-call-signature function types: per-piece fallback, but
     // ONLY `any` pieces fall to dyn — any other unmappable piece keeps
     // the whole type's own fence.
@@ -1483,7 +1489,7 @@ function anyPiecedFuncType(L: Lowerer, node: ts.Node, t: ts.Type): IrType | null
   const params: IrType[] = [];
   for (const p of sig.getParameters()) {
     const pt = L.checker.getTypeOfSymbolAtLocation(p, node);
-    let mapped = L.mapTypeOf(pt) ?? (pt.flags & ts.TypeFlags.Any ? DYN : null);
+    let mapped = L.mapTypeOf(pt) ?? (pt.flags & ts.TypeFlags.Any || isAnyElemArrayType(L, pt) ? DYN : null);
     // A parameter that SPELLS `any[]` is the checked-dynamic array, exactly as
     // the same parameter of a declared function is (dynFallbackType above):
     // `const writeValues = function (values: any[], ...)` (pg-protocol).
@@ -1497,7 +1503,7 @@ function anyPiecedFuncType(L: Lowerer, node: ts.Node, t: ts.Type): IrType | null
   const retT = L.checker.getReturnTypeOfSignature(sig);
   const ret: IrType | null =
     retT.flags & (ts.TypeFlags.Void | ts.TypeFlags.Never) ? VOID
-    : L.mapTypeOf(retT) ?? (retT.flags & ts.TypeFlags.Any ? DYN : null);
+    : L.mapTypeOf(retT) ?? (retT.flags & ts.TypeFlags.Any || isAnyElemArrayType(L, retT) ? DYN : null);
   if (!ret) return null;
   return { kind: "func", params, ret };
 }
