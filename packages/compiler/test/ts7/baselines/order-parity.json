@@ -17539,6 +17539,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26074-fs-promises-settle-in-the-poll-phase-after-ticks-and-promise-jobs-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26074-fs-promises-settle-in-the-poll-phase-after-ticks-and-promise-jobs-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2608-regex-named-groups.ts": {
    "order": [
     "<repo>/tests/corpus/2608-regex-named-groups.ts"
