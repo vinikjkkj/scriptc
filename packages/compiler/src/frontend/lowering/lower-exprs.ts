@@ -6849,6 +6849,38 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
     return e.args[0] ?? null;
   }
 
+/** The declared receiver type of a `function f(this: T, ...)` whose every reference is the callee of a `.call` / `.apply` — so the receiver
+   * ALWAYS arrives boxed from the caller's own record or object — when T is a record or a class instance (the by-reference kinds). Null for
+   * anything else (the ambient-receiver arm of lowerExpr's ThisKeyword case still serves those). declareParams reads this to materialise the
+   * receiver once, at the function's entry, as the caller's own object. */
+export function callOnlyThisReceiverType(L: Lowerer, o: ts.Node): IrType | null {
+  if (!(ts.isFunctionDeclaration(o) || ts.isFunctionExpression(o))) return null;
+  if (isJsSourceFile(o.getSourceFile())) return null;
+  const first = o.parameters[0];
+  if (first === undefined || !ts.isIdentifier(first.name) || first.name.text !== "this" || first.type === undefined) return null;
+  let nameNode: ts.Identifier | undefined;
+  if (ts.isFunctionDeclaration(o) && o.name !== undefined) nameNode = o.name;
+  else if (ts.isFunctionExpression(o) && o.parent !== undefined && ts.isVariableDeclaration(o.parent) && ts.isIdentifier(o.parent.name)) nameNode = o.parent.name;
+  else return null;
+  const sym = L.resolveValueSymbol(nameNode) ?? L.checker.getSymbolAtLocation(nameNode);
+  if (sym === undefined || sym === null) return null;
+  let ok = true;
+  const visit = (n: ts.Node): void => {
+    if (!ok) return;
+    if (ts.isIdentifier(n) && n !== nameNode && n.text === nameNode!.text && (L.resolveValueSymbol(n) ?? L.checker.getSymbolAtLocation(n)) === sym) {
+      const pa = n.parent;
+      ok = pa !== undefined && ts.isPropertyAccessExpression(pa) && pa.expression === n && (pa.name.text === "call" || pa.name.text === "apply") &&
+        pa.parent !== undefined && ts.isCallExpression(pa.parent) && pa.parent.expression === pa;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(nameNode.getSourceFile());
+  if (!ok) return null;
+  const t = L.mapTypeOf(L.checker.getTypeFromTypeNode(first.type));
+  return t !== undefined && t !== null && (t.kind === "record" || t.kind === "object") ? t : null;
+}
+
 /** `v === undefined` / `v !== null` — the narrowing tests for unit-armed
    * unions. A union operand compared with a unit literal lowers to a
    * runtime TAG test (unionIsTag); afterwards tsc's control-flow narrowing
