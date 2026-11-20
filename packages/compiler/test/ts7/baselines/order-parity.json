@@ -29831,6 +29831,12 @@
     "<repo>/tests/corpus/25919-members-of-tables-between-31-and-64-keys-answer-like-node-after-every-edit.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25920-math-floor-ceil-trunc-round-answer-every-edge-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25920-math-floor-ceil-trunc-round-answer-every-edge-like-node.ts"
+   ],
+   "diags": []
   }
  }
 }
