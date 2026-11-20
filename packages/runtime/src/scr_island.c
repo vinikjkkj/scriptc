@@ -4875,7 +4875,7 @@ static const char isl_util_src[] =
     "        };\n"
     "        const ret = maybe.call(value, depthRemaining, opts, inspect);\n"
     "        if (ret !== value) {\n"
-    "          return typeof ret !== \"string\" ? fmtValue(ctx, ret, depth) : ret;\n"
+    "          return typeof ret !== \"string\" ? fmtValue(ctx, ret, depth) : ret.replace(/\\n/g, \"\\n\" + \" \".repeat(ctx.indentationLvl));\n"
     "        }\n"
     "      }\n"
     "    }\n"
