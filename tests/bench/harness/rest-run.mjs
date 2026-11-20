@@ -98,6 +98,37 @@ if (ir) for (const a of arms) {
   console.error(`callgrind ${label}: exit=${r.status} Ir=${ok}; http requests ${(() => { try { return JSON.parse(readFileSync(`${run}/arm/http.json`, 'utf8')).length } catch { return '?' } })()}`)
 }
 for (const r of results.runs) r.parity = nodeFp === null ? 'no-node-ref' : r.fp === nodeFp ? 'SAME' : 'DIFFERS'
+// PARITYDIFF: for every compiled run that DIFFERS, print what differs against the first node run (same normalisation as fingerprint), per file: the first 12 differing
+// positions, whether the two sides hold the SAME multiset of records (ordering-only) or not (content), and the records only one side has. Log only; no verdict changes.
+const recsOf = (dir, f) => {
+  let t = ''; try { t = readFileSync(`${dir}/${f}`, 'utf8') } catch { return ['MISSING'] }
+  try {
+    if (f === 'http.json') return JSON.parse(t).map((r) => norm(JSON.stringify({ s: r.status, h: Object.fromEntries(Object.entries(r.headers || {}).filter(([k]) => k !== 'date')), b: r.body_resp ?? String(r.error) })))
+    if (f === 'exit.json') return [JSON.stringify(JSON.parse(t).exited)]
+    const j = JSON.parse(t); if (Array.isArray(j)) return j.map((x) => norm(typeof x === 'string' ? x : JSON.stringify(x)))
+  } catch {}
+  return norm(t).split('\n')
+}
+const nodeRun = results.runs.find((r) => r.label === 'node')
+if (nodeRun) for (const r of results.runs) {
+  if (r.label === 'node' || r.parity !== 'DIFFERS') continue
+  for (const f of ['http.json', 'stanzas.json', 'exit.json']) {
+    const A = recsOf(`${out}/node.${nodeRun.rep}/arm`, f), B = recsOf(`${out}/${r.label}.${r.rep}/arm`, f)
+    const eq = A.length === B.length && A.every((x, i) => x === B[i])
+    if (eq) { console.error(`PARITYDIFF ${r.label} rep ${r.rep} ${f}: identical (${A.length} records)`); continue }
+    const sa = [...A].sort(), sb = [...B].sort()
+    const same = sa.length === sb.length && sa.every((x, i) => x === sb[i])
+    console.error(`PARITYDIFF ${r.label} rep ${r.rep} ${f}: node ${A.length} records, compiled ${B.length}; multiset ${same ? 'EQUAL (ordering only)' : 'DIFFERENT (content)'}`)
+    let shown = 0
+    for (let i = 0; i < Math.max(A.length, B.length) && shown < 12; i++) if (A[i] !== B[i]) { shown++; console.error(`  [${i}] node: ${String(A[i]).slice(0, 300)}\n  [${i}] comp: ${String(B[i]).slice(0, 300)}`) }
+    if (!same) {
+      const cnt = (xs) => { const m = new Map(); for (const x of xs) m.set(x, (m.get(x) ?? 0) + 1); return m }
+      const ma = cnt(A), mb = cnt(B); let k = 0
+      for (const [x, n] of ma) { const o = mb.get(x) ?? 0; if (n > o && k++ < 8) console.error(`  only-node (x${n - o}): ${x.slice(0, 300)}`) }
+      for (const [x, n] of mb) { const o = ma.get(x) ?? 0; if (n > o && k++ < 16) console.error(`  only-comp (x${n - o}): ${x.slice(0, 300)}`) }
+    }
+  }
+}
 writeFileSync(`${out}/results.json`, JSON.stringify(results, null, 1))
 const med = (xs) => { const s = xs.filter((x) => x != null).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null }
 const pct = (a, b) => (a == null || b == null || a === 0 ? '' : `${b >= a ? '+' : ''}${(((b - a) / a) * 100).toFixed(2)}%`)
