@@ -1548,6 +1548,115 @@ static const char web_prelude[] =
     "  /* crypto: randomness bridges to the HOST functions (one source of truth —\n"
     "   * the same arc4random_buf CSPRNG behind the static crypto lowerings). */\n"
     "  const intTA = ['Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array', 'BigInt64Array', 'BigUint64Array'];\n"
+    /* Node's inspect shapes for the prelude's classes (their own state is internal and must not print). */
+    "  const INSP = Symbol.for('nodejs.util.inspect.custom');\n"
+    "  const defInsp = (C, fn) => Object.defineProperty(C.prototype, INSP, { value: fn, writable: true, configurable: true });\n"
+    "  defInsp(URLSearchParams, function (depth, opts, inspect) {\n"
+    "    if (typeof depth === 'number' && depth < 0) return '[Object]';\n"
+    "    const inner = { ...opts }; if (depth !== null) inner.depth = depth - 1;\n"
+    "    const out = this._pairs.map(([k, v]) => inspect(k, inner) + ' => ' + inspect(v, inner));\n"
+    "    const len = out.reduce((p, c) => p + c.length + 2, -2);\n"
+    "    const name = this.constructor.name;\n"
+    "    if (len > opts.breakLength) return name + ' {\\n  ' + out.join(',\\n  ') + ' }';\n"
+    "    return out.length ? name + ' { ' + out.join(', ') + ' }' : name + ' {}';\n"
+    "  });\n"
+    "  defInsp(TextEncoder, function (depth, opts, inspect) { return typeof depth === 'number' && depth < 0 ? '[Object]' : inspect({ encoding: 'utf-8' }, opts); });\n"
+    "  defInsp(TextDecoder, function (depth, opts, inspect) {\n"
+    "    if (typeof depth === 'number' && depth < 0) return '[Object]';\n"
+    "    return 'TextDecoder ' + inspect({ encoding: this.encoding, fatal: this.fatal, ignoreBOM: this.ignoreBOM }, opts);\n"
+    "  });\n"
+    "  defInsp(AbortSignal, function (depth, opts, inspect) { return typeof depth === 'number' && depth < 0 ? '[AbortSignal]' : 'AbortSignal ' + inspect({ aborted: this.aborted }, opts); });\n"
+    "  defInsp(AbortController, function (depth, opts, inspect) {\n"
+    "    if (typeof depth === 'number' && depth < 0) return '[AbortController]';\n"
+    "    return 'AbortController ' + inspect({ signal: this.signal }, { ...opts, depth: depth === null ? null : depth - 1 });\n"
+    "  });\n"
+    "  defInsp(EventTarget, function (depth, opts, inspect) { return this.constructor.name + ' {}'; });\n"
+    "  defInsp(Event, function (depth, opts, inspect) {\n"
+    "    if (typeof depth === 'number' && depth < 0) return '[' + this.constructor.name + ']';\n"
+    "    return this.constructor.name + ' ' + inspect({ type: this.type, defaultPrevented: this.defaultPrevented, cancelable: this.cancelable, timeStamp: this.timeStamp }, opts);\n"
+    "  });\n"
+    "  defInsp(Blob, function (depth, opts, inspect) {\n"
+    "    if (typeof depth === 'number' && depth < 0) return '[Blob]';\n"
+    "    return 'Blob ' + inspect({ size: this.size, type: this.type }, opts);\n"
+    "  });\n"
+    "  defInsp(File, function (depth, opts, inspect) {\n"
+    "    if (typeof depth === 'number' && depth < 0) return '[File]';\n"
+    "    return 'File ' + inspect({ size: this.size, type: this.type, name: this.name, lastModified: this.lastModified }, opts);\n"
+    "  });\n"
+#ifndef SCR_DYNAMIC
+    /* URL (engine-only builds): a handle over the static runtime's WHATWG parser, plus the searchParams link (a mutation of the params
+     * rewrites the query, a new search rebuilds the params) and Node's inspect shape. */
+    "  const invalidUrl = (input, base) => {\n"
+    "    const e = new TypeError('Invalid URL');\n"
+    "    e.code = 'ERR_INVALID_URL';\n"
+    "    e.input = input;\n"
+    "    if (base !== undefined) e.base = base;\n"
+    "    if (typeof e.stack === 'string') e.stack = e.stack.replace(/^TypeError/, 'TypeError [ERR_INVALID_URL]');\n"
+    "    return e;\n"
+    "  };\n"
+    "  const UH = Symbol('urlHandle');\n"
+    "  const USP = Symbol('urlSearchParams');\n"
+    "  class URL {\n"
+    "    constructor(input, base) {\n"
+    "      if (arguments.length === 0) {\n"
+    "        const e = new TypeError('The \"url\" argument must be specified');\n"
+    "        e.code = 'ERR_MISSING_ARGS';\n"
+    "        if (typeof e.stack === 'string') e.stack = e.stack.replace(/^TypeError/, 'TypeError [ERR_MISSING_ARGS]');\n"
+    "        throw e;\n"
+    "      }\n"
+    "      const h = host.urlNew(`${input}`, base === undefined ? undefined : `${base}`);\n"
+    "      if (h === null) throw invalidUrl(`${input}`, base === undefined ? undefined : `${base}`);\n"
+    "      Object.defineProperty(this, UH, { value: h });\n"
+    "      Object.defineProperty(this, USP, { value: null, writable: true });\n"
+    "    }\n"
+    "    get href() { return host.urlGet(this[UH], 0); }\n"
+    "    set href(v) { if (!host.urlSet(this[UH], 0, `${v}`)) throw invalidUrl(`${v}`); this._resync(); }\n"
+    "    get origin() { return host.urlGet(this[UH], 1); }\n"
+    "    get protocol() { return host.urlGet(this[UH], 2); }\n"
+    "    set protocol(v) { host.urlSet(this[UH], 2, `${v}`); }\n"
+    "    get username() { return host.urlGet(this[UH], 3); }\n"
+    "    set username(v) { host.urlSet(this[UH], 3, `${v}`); }\n"
+    "    get password() { return host.urlGet(this[UH], 4); }\n"
+    "    set password(v) { host.urlSet(this[UH], 4, `${v}`); }\n"
+    "    get host() { return host.urlGet(this[UH], 5); }\n"
+    "    set host(v) { host.urlSet(this[UH], 5, `${v}`); }\n"
+    "    get hostname() { return host.urlGet(this[UH], 6); }\n"
+    "    set hostname(v) { host.urlSet(this[UH], 6, `${v}`); }\n"
+    "    get port() { return host.urlGet(this[UH], 7); }\n"
+    "    set port(v) { host.urlSet(this[UH], 7, `${v}`); }\n"
+    "    get pathname() { return host.urlGet(this[UH], 8); }\n"
+    "    set pathname(v) { host.urlSet(this[UH], 8, `${v}`); }\n"
+    "    get search() { return host.urlGet(this[UH], 9); }\n"
+    "    set search(v) { host.urlSet(this[UH], 9, `${v}`); this._resync(); }\n"
+    "    get hash() { return host.urlGet(this[UH], 10); }\n"
+    "    set hash(v) { host.urlSet(this[UH], 10, `${v}`); }\n"
+    "    get searchParams() {\n"
+    "      if (this[USP] === null) {\n"
+    "        const sp = new URLSearchParams(this.search);\n"
+    "        Object.defineProperty(sp, '_owner', { value: this, writable: true, configurable: true });\n"
+    "        this[USP] = sp;\n"
+    "      }\n"
+    "      return this[USP];\n"
+    "    }\n"
+    "    _resync() { if (this[USP] !== null) this[USP]._pairs = new URLSearchParams(this.search)._pairs; }\n"
+    "    toString() { return this.href; }\n"
+    "    toJSON() { return this.href; }\n"
+    "    static canParse(input, base) { return host.urlNew(`${input}`, base === undefined ? undefined : `${base}`) !== null; }\n"
+    "    static parse(input, base) { try { return new URL(input, base); } catch { return null; } }\n"
+    "    get [Symbol.toStringTag]() { return 'URL'; }\n"
+    "    [INSP](depth, opts, inspect) {\n"
+    "      if (typeof depth === 'number' && depth < 0) return this;\n"
+    "      const obj = {};\n"
+    "      for (const k of ['href', 'origin', 'protocol', 'username', 'password', 'host', 'hostname', 'port', 'pathname', 'search', 'searchParams', 'hash']) obj[k] = this[k];\n"
+    "      return 'URL ' + inspect(obj, opts);\n"
+    "    }\n"
+    "  }\n"
+    "  for (const m of ['append', 'delete', 'set', 'sort']) {\n"
+    "    const orig = URLSearchParams.prototype[m];\n"
+    "    Object.defineProperty(URLSearchParams.prototype, m, { value: { [m](...a) { const r = orig.apply(this, a); if (this._owner) { const q = this.toString(); host.urlSet(this._owner[UH], 9, q === '' ? '' : '?' + q); } return r; } }[m], writable: true, configurable: true });\n"
+    "  }\n"
+    "  g.URL = URL;\n"
+#endif
     "  g.crypto = {\n"
     "    getRandomValues(ta) {\n"
     "      const tag = ta === null || typeof ta !== 'object' ? '' : Object.prototype.toString.call(ta).slice(8, -1);\n"
@@ -1854,6 +1963,116 @@ void scr_island_timers_teardown(void) {
   }
 }
 
+#ifndef SCR_DYNAMIC
+/* ── URL over the static runtime's WHATWG parser (scr_url.c) ─────────────
+ * The engine-side URL class (below, in the prelude) holds one opaque handle per URL; every component read and write goes through the SAME
+ * parser, serializer and setters the static `new URL` uses, so the two worlds agree on every input. */
+static JSClassID web_url_class_id;
+static void web_url_finalizer(JSRuntime *rt, JSValue v) {
+  (void)rt;
+  ScrUrl *u = JS_GetOpaque(v, web_url_class_id);
+  if (u) scr_url_release(u);
+}
+static JSClassDef web_url_class_def = {"URLHandle", web_url_finalizer, NULL, NULL, NULL};
+
+static ScrStr *web_arg_str(JSContext *ctx, JSValueConst v) {
+  size_t len;
+  const char *t = JS_ToCStringLen(ctx, &len, v);
+  if (!t) return NULL;
+  ScrStr *r = scr_str_new(t, len);
+  JS_FreeCString(ctx, t);
+  return r;
+}
+
+/* host.urlNew(input, base?) -> handle, or null when the input (or the base) does not parse. */
+static JSValue web_host_url_new(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  ScrStr *in = web_arg_str(ctx, argv[0]);
+  if (!in) return JS_EXCEPTION;
+  ScrUrl *u = NULL;
+  if (argc > 1 && !JS_IsUndefined(argv[1])) {
+    ScrStr *b = web_arg_str(ctx, argv[1]);
+    if (!b) {
+      scr_str_release(in);
+      return JS_EXCEPTION;
+    }
+    ScrUrl *bu = scr_url_new(b);
+    scr_str_release(b);
+    if (bu) {
+      u = scr_url_new_rel(in, bu);
+      scr_url_release(bu);
+    }
+  } else {
+    u = scr_url_new(in);
+  }
+  scr_str_release(in);
+  if (!u) {
+    scr_exc_clear();
+    return JS_NULL;
+  }
+  JSValue h = JS_NewObjectClass(ctx, (int)web_url_class_id);
+  if (JS_IsException(h)) {
+    scr_url_release(u);
+    return h;
+  }
+  JS_SetOpaque(h, u);
+  return h;
+}
+
+/* host.urlGet(handle, k): 0 href 1 origin 2 protocol 3 username 4 password 5 host 6 hostname 7 port 8 pathname 9 search 10 hash */
+static JSValue web_host_url_get(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  ScrUrl *u = JS_GetOpaque2(ctx, argv[0], web_url_class_id);
+  if (!u) return JS_EXCEPTION;
+  int32_t k = 0;
+  JS_ToInt32(ctx, &k, argv[1]);
+  ScrStr *r;
+  switch (k) {
+    case 0: r = scr_url_href(u); break;
+    case 1: r = scr_url_origin(u); break;
+    case 2: r = scr_url_protocol(u); break;
+    case 3: r = scr_url_username(u); break;
+    case 4: r = scr_url_password(u); break;
+    case 5: r = scr_url_host(u); break;
+    case 6: r = scr_url_hostname(u); break;
+    case 7: r = scr_url_port(u); break;
+    case 8: r = scr_url_pathname(u); break;
+    case 9: r = scr_url_search(u); break;
+    default: r = scr_url_hash(u); break;
+  }
+  JSValue v = JS_NewStringLen(ctx, r->data, r->len);
+  scr_str_release(r);
+  return v;
+}
+
+/* host.urlSet(handle, k, value): the getter's numbering; false when the setter refused (href only). */
+static JSValue web_host_url_set(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  ScrUrl *u = JS_GetOpaque2(ctx, argv[0], web_url_class_id);
+  if (!u) return JS_EXCEPTION;
+  int32_t k = 0;
+  JS_ToInt32(ctx, &k, argv[1]);
+  ScrStr *v = web_arg_str(ctx, argv[2]);
+  if (!v) return JS_EXCEPTION;
+  if (k == 2) {
+    scr_url_set_protocol(u, v);
+  } else {
+    /* scr_url_set_part: 0 pathname 1 search 2 hash 3 port 4 hostname 5 host 6 username 7 password 8 href */
+    static const int part[11] = {8, -1, -1, 6, 7, 5, 4, 3, 0, 1, 2};
+    scr_url_set_part(u, (double)part[k], v);
+  }
+  scr_str_release(v);
+  if (scr_exc_pending()) {
+    scr_exc_clear();
+    return JS_FALSE;
+  }
+  return JS_TRUE;
+}
+
+#endif /* !SCR_DYNAMIC */
+
 /* ── host functions ───────────────────────────────────────────────────
  * The prelude's I/O-free exceptions: randomness (bridged to the SAME
  * arc4random_buf CSPRNG behind the static crypto lowerings — one source
@@ -1955,6 +2174,16 @@ void scr_island_web_boot(void *jsctx) {
   JS_SetPropertyStr(ctx, host, "setImmediate", JS_NewCFunction(ctx, web_host_set_immediate, "setImmediate", 1));
   JS_SetPropertyStr(ctx, host, "clearImmediate", JS_NewCFunction(ctx, web_host_clear_immediate, "clearImmediate", 1));
   JS_SetPropertyStr(ctx, host, "refImmediate", JS_NewCFunction(ctx, web_host_ref_immediate, "refImmediate", 2));
+#ifndef SCR_DYNAMIC
+  {
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    if (web_url_class_id == 0) JS_NewClassID(rt, &web_url_class_id);
+    JS_NewClass(rt, web_url_class_id, &web_url_class_def);
+  }
+  JS_SetPropertyStr(ctx, host, "urlNew", JS_NewCFunction(ctx, web_host_url_new, "urlNew", 2));
+  JS_SetPropertyStr(ctx, host, "urlGet", JS_NewCFunction(ctx, web_host_url_get, "urlGet", 2));
+  JS_SetPropertyStr(ctx, host, "urlSet", JS_NewCFunction(ctx, web_host_url_set, "urlSet", 3));
+#endif
   JS_SetPropertyStr(ctx, host, "clearTimer", JS_NewCFunction(ctx, web_host_clear_timer, "clearTimer", 1));
   JS_SetPropertyStr(ctx, host, "refTimer", JS_NewCFunction(ctx, web_host_ref_timer, "refTimer", 2));
   JS_SetPropertyStr(ctx, host, "timerHasRef", JS_NewCFunction(ctx, web_host_timer_has_ref, "timerHasRef", 1));
