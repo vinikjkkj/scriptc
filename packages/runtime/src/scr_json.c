@@ -681,6 +681,15 @@ static __attribute__((noinline, cold)) void scr_props_ghost_drop(const ScrDyn *d
  * Only the runtime's own encodings unwrap.  A user object built over
  * Error.prototype has no ScrError behind it, and a composite dyn has no
  * scalar arm, so both keep the REF arm exactly as before. */
+/* String(e) for a caught REF payload that is a dyn null/undefined; NULL for everything else (the caller's historical text). */
+static ScrStr *scr_caught_dyn_ref_string(const ScrCaught *c) {
+  if (c->retain_fn != scr_dyn_retain_v) return NULL;
+  const ScrDyn *d = (const ScrDyn *)c->payload;
+  if (d->kind == SCR_DYN_NULL) return scr_str_new("null", 4);
+  if (d->kind == SCR_DYN_UNDEF) return scr_str_new("undefined", 9);
+  return NULL;
+}
+
 void scr_throw_dyn(ScrDyn *v) {
   ScrError *behind = scr_errdyn_err_of(v); /* +1 or NULL */
   if (behind != NULL) {
@@ -723,6 +732,7 @@ void scr_throw_dyn(ScrDyn *v) {
     return;
   }
   /* Every other dyn kind keeps the historical REF arm, byte for byte. */
+  scr_caught_ref_str_hook = scr_caught_dyn_ref_string;
   scr_throw_ref(v, scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
 }
 

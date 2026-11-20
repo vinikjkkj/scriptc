@@ -1422,8 +1422,11 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       // Any supported value type can be thrown; ownership moves into the
       // runtime's exception cell. `throw f()` of a void call has no value —
       // rejected via the type fence.
-      const value = L.lowerExpr(stmt.expression);
+      let value = L.lowerExpr(stmt.expression);
       if (value.type.kind === "void") L.badType(stmt.expression, L.typeOf(stmt.expression));
+      // `throw null` / `throw undefined`: a unit value has no payload cell of its own, so it
+      // travels as the checked-dynamic null/undefined (the catch binding reads it back exactly).
+      if (value.kind === "unitLit") value = { kind: "dynFrom", value, type: DYN, loc: locOf(stmt) };
       // A dyn throw rides the REF cell arm (scr_throw_ref over the checked-dynamic tree
       // node — identity preserved through catch bindings, caughtToDyn
       // passes it back by reference). The JS-lane traced-call shape:
