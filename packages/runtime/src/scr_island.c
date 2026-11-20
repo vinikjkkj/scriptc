@@ -42,6 +42,9 @@ static void isl_walk_capture(void);
 static void isl_walk_release(void);
 
 #include "quickjs.h"
+#ifndef SCR_DYNAMIC
+#include "scr_width.h"
+#endif
 
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
@@ -644,13 +647,12 @@ static bool isl_walk_builtins_intact(int mode) {
 }
 
 static ScrStr *isl_dyn_reason_text(const ScrDyn *d);
-
-static void isl_init(void) {
-  isl_rt = JS_NewRuntime2(&isl_mf, NULL);
-  if (!isl_rt) {
 #ifndef SCR_DYNAMIC
 static void isl_job_enqueued(void *opaque);
 #endif
+static void isl_init(void) {
+  isl_rt = JS_NewRuntime2(&isl_mf, NULL);
+  if (!isl_rt) {
     fprintf(stderr, "scriptc: island engine runtime allocation failed\n");
     abort();
   }
@@ -689,13 +691,13 @@ static void isl_job_enqueued(void *opaque);
    * handler attachment gets its chance to rescind. */
   JS_SetHostPromiseRejectionTracker(isl_rt, isl_rejection_tracker, NULL);
   scr_island_reason_text_fn = isl_dyn_reason_text;
-  scr_loop_set_island_rejections(isl_report_rejections,
-                                 scr_island_drain_jobs);
-  /* Armed island timers (AbortSignal.timeout) cap the loop's idle sleep
 #ifndef SCR_DYNAMIC
   /* One static microtask per engine job: the two queues interleave in the order the jobs were queued, like one V8 queue. */
   JS_SetJobEnqueueHook(isl_rt, isl_job_enqueued, NULL);
 #endif
+  scr_loop_set_island_rejections(isl_report_rejections,
+                                 scr_island_drain_jobs);
+  /* Armed island timers (AbortSignal.timeout) cap the loop's idle sleep
    * so they fire on time while the poller waits on socket readiness —
    * without keeping the loop alive by themselves (Node's unref'd timer).
    * The curl fetch bridge capped its own poll instead; the native bridge
@@ -812,9 +814,6 @@ int scr_island_drain_jobs(void) {
   return n;
 }
 
-static bool isl_io_pending(void) {
-  if (isl_rt != NULL && JS_IsJobPending(isl_rt)) return true;
-  /* A DUE island timer is pending work (fire it this turn); a merely
 #ifndef SCR_DYNAMIC
 /* The marker the enqueue hook posts on the static microtask queue: it runs the oldest engine job (a drain that already ran it makes this a no-op). */
 static void isl_job_marker(void *arg) {
@@ -837,6 +836,9 @@ static void isl_job_enqueued(void *opaque) {
 }
 #endif
 
+static bool isl_io_pending(void) {
+  if (isl_rt != NULL && JS_IsJobPending(isl_rt)) return true;
+  /* A DUE island timer is pending work (fire it this turn); a merely
    * ARMED one is not — AbortSignal.timeout is unref'd like Node's and
    * must never keep the loop alive by itself. */
   if (isl_rt != NULL && scr_island_timers_due()) return true;
@@ -5744,31 +5746,14 @@ static const char isl_console_src[] =
     "    }\n"
     "    host.write(fd, s + \"\\n\");\n"
     "  };\n"
-    "  const warnOnce = { traced: false };\n"
-    "  const emitWarning = (msg) => {\n"
-    "    let text = \"(node:\" + host.pid() + \") Warning: \" + msg + \"\\n\";\n"
-    "    if (!warnOnce.traced) {\n"
-    "      warnOnce.traced = true;\n"
-    "      text += \"(Use `node --trace-warnings ...` to show where the warning was created)\\n\";\n"
-    "    }\n"
-    "    host.write(2, text);\n"
-    "  };\n"
-    "  const isFull = (cp) =>\n"
-    "    cp >= 0x1100 && (cp <= 0x115f || cp === 0x2329 || cp === 0x232a ||\n"
-    "      (cp >= 0x2e80 && cp <= 0x3247 && cp !== 0x303f) || (cp >= 0x3250 && cp <= 0x4dbf) ||\n"
-    "      (cp >= 0x4e00 && cp <= 0xa4c6) || (cp >= 0xa960 && cp <= 0xa97c) || (cp >= 0xac00 && cp <= 0xd7a3) ||\n"
-    "      (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe10 && cp <= 0xfe19) || (cp >= 0xfe30 && cp <= 0xfe6b) ||\n"
-    "      (cp >= 0xff01 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1b000 && cp <= 0x1b001) ||\n"
-    "      (cp >= 0x1f200 && cp <= 0x1f251) || (cp >= 0x1f300 && cp <= 0x1f64f) || (cp >= 0x20000 && cp <= 0x3fffd));\n"
-    "  const isZero = (cp) => cp <= 0x1f || (cp >= 0x7f && cp <= 0x9f) || (cp >= 0x300 && cp <= 0x36f) ||\n"
-    "    (cp >= 0x200b && cp <= 0x200f) || (cp >= 0x20d0 && cp <= 0x20ff) || (cp >= 0xfe00 && cp <= 0xfe0f) ||\n"
-    "    (cp >= 0xfe20 && cp <= 0xfe2f) || (cp >= 0xe0100 && cp <= 0xe01ef);\n"
+    "  const emitWarning = (msg) => host.warn(msg);\n"
     "  const width = (s) => {\n"
+    "    s = util().stripVTControlCharacters(String(s));\n"
     "    let w = 0;\n"
-    "    for (const ch of String(s)) {\n"
-    "      const cp = ch.codePointAt(0);\n"
-    "      if (isFull(cp)) w += 2;\n"
-    "      else if (!isZero(cp)) w++;\n"
+    "    for (let i = 0; i < s.length; i++) {\n"
+    "      const code = s.charCodeAt(i);\n"
+    "      if (code >= 127) { w += host.width(s.slice(i).normalize(\"NFC\")); break; }\n"
+    "      w += code >= 32 ? 1 : 0;\n"
     "    }\n"
     "    return w;\n"
     "  };\n"
@@ -11540,6 +11525,48 @@ static JSValue isl_console_host_util(JSContext *ctx, JSValueConst this_val, int 
   (void)argv;
   return JS_DupValue(ctx, isl_native_util());
 }
+/* console.* misuse warnings: process.emitWarning's nextTick deferral, through the same queue and printer the static side's warnings use. */
+static JSValue isl_console_host_warn(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  size_t len;
+  const char *t = JS_ToCStringLen(ctx, &len, argv[0]);
+  if (!t) return JS_EXCEPTION;
+  scr_proc_warn_defer("Warning", t, len);
+  JS_FreeCString(ctx, t);
+  return JS_UNDEFINED;
+}
+/* The column width of a string already in NFC (Node's icu getStringWidth): the sum of the per-code-point widths in scr_width.h. */
+static int isl_cp_width(uint32_t cp) {
+  size_t lo = 0, hi = sizeof scr_width_runs / sizeof scr_width_runs[0];
+  while (lo < hi) {
+    size_t mid = (lo + hi) / 2;
+    if (cp < scr_width_runs[mid][0]) hi = mid;
+    else if (cp > scr_width_runs[mid][1]) lo = mid + 1;
+    else return (int)scr_width_runs[mid][2];
+  }
+  return 1;
+}
+static JSValue isl_console_host_width(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  size_t len;
+  const char *t = JS_ToCStringLen(ctx, &len, argv[0]);
+  if (!t) return JS_EXCEPTION;
+  const unsigned char *p = (const unsigned char *)t;
+  int64_t w = 0;
+  for (size_t i = 0; i < len;) {
+    uint32_t cp = p[i];
+    size_t n = 1;
+    if (cp >= 0xf0 && i + 3 < len) { cp = ((cp & 7u) << 18) | ((p[i + 1] & 63u) << 12) | ((p[i + 2] & 63u) << 6) | (p[i + 3] & 63u); n = 4; }
+    else if (cp >= 0xe0 && i + 2 < len) { cp = ((cp & 15u) << 12) | ((p[i + 1] & 63u) << 6) | (p[i + 2] & 63u); n = 3; }
+    else if (cp >= 0xc0 && i + 1 < len) { cp = ((cp & 31u) << 6) | (p[i + 1] & 63u); n = 2; }
+    w += isl_cp_width(cp);
+    i += n;
+  }
+  JS_FreeCString(ctx, t);
+  return JS_NewInt64(ctx, w);
+}
 static JSValue isl_console_host_now(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   (void)argc;
@@ -11558,6 +11585,8 @@ void isl_console_boot(void *jsctx) {
   JS_SetPropertyStr(ctx, host, "write", JS_NewCFunction(ctx, isl_console_host_write, "write", 2));
   JS_SetPropertyStr(ctx, host, "util", JS_NewCFunction(ctx, isl_console_host_util, "util", 0));
   JS_SetPropertyStr(ctx, host, "hrtime", JS_NewCFunction(ctx, isl_console_host_now, "hrtime", 0));
+  JS_SetPropertyStr(ctx, host, "warn", JS_NewCFunction(ctx, isl_console_host_warn, "warn", 1));
+  JS_SetPropertyStr(ctx, host, "width", JS_NewCFunction(ctx, isl_console_host_width, "width", 1));
   JS_SetPropertyStr(ctx, host, "pid", JS_NewCFunction(ctx, isl_host_pid, "pid", 0));
   JSValue con = JS_Call(ctx, fn, JS_UNDEFINED, 1, (JSValueConst *)&host);
   JS_FreeValue(ctx, host);
