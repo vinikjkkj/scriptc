@@ -27,6 +27,8 @@ function parse(text) {
   return { self, calls, total }
 }
 const cap = (rows, n) => { let s = '', k = 0; for (const r of rows) { if (s.length + r.length + 1 > n) break; s += r + '\n'; k++ } return s + `# ${k} of ${rows.length} rows shown\n` }
+// every emitted program function (sc_*) that ran, name and calls, in parts that labecho prints whole: reach-<label>-sc-NN.txt
+function writeParts(art, base, rows, cap) { let part = [], size = 0, n = 0; const flush = () => { if (part.length) { writeFileSync(`${art}/${base}-${String(n++).padStart(2, '0')}.txt`, part.join('\n') + '\n'); part = []; size = 0 } }; for (const r of rows) { if (size + r.length + 1 > cap) flush(); part.push(r); size += r.length + 1 } flush() }
 for (const f of readdirSync(dir).filter((x) => x.endsWith('.callgrind.out'))) {
   const label = f.replace('.callgrind.out', '')
   const p = parse(readFileSync(`${dir}/${f}`, 'utf8'))
@@ -35,6 +37,7 @@ for (const f of readdirSync(dir).filter((x) => x.endsWith('.callgrind.out'))) {
   const rows = [...keys].map((k) => ({ k, n: sym(k), calls: p.calls.get(k) ?? 0, ir: p.self.get(k) ?? 0 }))
   const scr = rows.filter((r) => /^scr_/.test(r.n)), other = rows.filter((r) => !/^scr_/.test(r.n))
   const line = (r) => `${r.calls} | ${r.ir} | ${r.n.slice(0, 120)}`
+  writeParts(art, `reach-${label}-sc`, other.filter((r) => /^sc_/.test(r.n)).sort((a, b) => b.calls - a.calls).map((r) => `${r.calls} ${r.n}`), 28000)
   writeFileSync(`${art}/reach-${label}-summary.txt`, `${label}: total Ir ${p.total}; distinct functions ${rows.length}; scr_* ${scr.length} (Ir ${scr.reduce((t, r) => t + r.ir, 0)}); other ${other.length} (Ir ${other.reduce((t, r) => t + r.ir, 0)})\n`)
   writeFileSync(`${art}/reach-${label}-scr-bycalls.txt`, '# calls | exclusive_Ir | function (scr_* runtime functions, by calls)\n' + cap([...scr].sort((a, b) => b.calls - a.calls).map(line), 28000))
   writeFileSync(`${art}/reach-${label}-scr-byir.txt`, '# calls | exclusive_Ir | function (scr_* runtime functions, by exclusive Ir)\n' + cap([...scr].sort((a, b) => b.ir - a.ir).map(line), 28000))
