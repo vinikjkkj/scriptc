@@ -637,6 +637,7 @@ static void zl_job_done(ScrWork *w, bool ran) {
 static ZlJob *zl_job_new(bool inflating, int mode, const ZlParams *p, ScrBytes *in, ScrBytes *dict) {
   ZlJob *j = calloc(1, sizeof *j);
   if (j == NULL) scr_zlib_oom();
+  j->w.name = inflating ? "zlib-inflate" : "zlib-deflate";
   j->w.run = zl_job_run;
   j->w.done = zl_job_done;
   j->inflating = inflating;

@@ -13251,6 +13251,7 @@ void scr_loop_set_watch(bool (*pending)(void), void (*dispatch)(void), int (*pol
 typedef struct ScrWork ScrWork;
 struct ScrWork {
   ScrWork *next; /* pool-owned linkage */
+  const char *name; /* census label (a string literal), or NULL */
   void (*run)(ScrWork *w);
   void (*done)(ScrWork *w, bool ran);
 };
