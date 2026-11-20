@@ -3255,6 +3255,10 @@ export type IrStrIntrinsicMethod =
   // normalize(form): form is the args[0] STRING (NFC/NFD/NFKC/NFKD; the
   // frontend completes an omitted form to "NFC"). scr_regex.c, lre-linked.
   | "normalize"
+  // toLocaleLowerCase(tag) / toLocaleUpperCase(tag): args[0] is the language tag STRING (an invalid tag throws Node's catchable
+  // RangeError, scr_str_to_locale_case's exception cell). The no-tag form is toLowerCase/toUpperCase. scr_regex.c, lre-linked.
+  | "toLocaleLowerCase"
+  | "toLocaleUpperCase"
   // isWellFormed()/toWellFormed() — no-ops over the runtime's well-formed
   // storage (lone surrogates became U+FFFD at their producers): constant
   // true and the identity, per spec on well-formed input.
@@ -11131,7 +11135,7 @@ export function moduleUsesRegex(mod: IrModule): boolean {
     // case tables): they ride the same link switch as regex nodes.
     if (kind === "strIntrinsic") {
       const method = (v as { method?: unknown }).method;
-      if (method === "toLowerCase" || method === "toUpperCase" || method === "normalize" || method === "localeCompare") {
+      if (method === "toLowerCase" || method === "toUpperCase" || method === "normalize" || method === "localeCompare" || method === "toLocaleLowerCase" || method === "toLocaleUpperCase") {
         found = true;
         return;
       }
