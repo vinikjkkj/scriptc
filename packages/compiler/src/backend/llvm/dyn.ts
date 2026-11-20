@@ -1131,6 +1131,7 @@ export class LlDyn {
     const struct = mangleRecordStruct(shapeId);
     const dc = this.dynCheckHelper({ kind: "record", shapeId });
     host.declare(`declare void @scr_rec_swap_body(ptr, ptr, i64)`);
+    host.declare(`@scr_rec_sync_eager = external global i32`);
     host.declare(`declare zeroext i1 @scr_recsrc_is(ptr)`);
     this.defs.push(
       `define internal void @${name}(ptr %r) ${FN_ATTRS} { ; refresh the view's snapshot of ${shapeId}`,
@@ -1142,7 +1143,9 @@ export class LlDyn {
       `  %isrs = call zeroext i1 @scr_recsrc_is(ptr %v)`,
       `  br i1 %isrs, label %done, label %go`,
       `go:`,
+      `  store i32 ${process.env["SCRIPTC_RECVIEW_MUTANT"] === "noeager" ? 0 : 1}, ptr @scr_rec_sync_eager`,
       `  %t = call ptr @${dc}(ptr %v, ptr null)`,
+      `  store i32 0, ptr @scr_rec_sync_eager`,
       `  %tn = icmp eq ptr %t, null`,
       `  br i1 %tn, label %done, label %swap`,
       `swap:`,
@@ -1825,6 +1828,57 @@ export class LlDyn {
         const funcOnly = !dialWide && host.funcLaneShapes.has(t.shapeId) && kindgateFuncLane(soft, shape);
         const dial = dialWide || funcOnly;
         const jsv = kindgateJsvalLane(shape, host.engineModule);
+        // VIEW GRANT, INDEX SIGNATURE (hard builder, a pure `{ [key: string]: T }` shape) - emit-walkers.ts's lazyIdx row: the record is
+        // a view of the object and nothing is read at the cast. The snapshot is built only by viewSyncHelper, which asks for the eager
+        // build through scr_rec_sync_eager (consumed here, so a nested conversion stays lazy).
+        const lazyIdx = process.env["SCRIPTC_RECVIEW_MUTANT"] !== "eagercast" && !soft && shape.view === true && shape.indexValue !== undefined && shape.fields.length === 0 && !shape.keyOrders && !shape.tostr;
+        const lazyIdxLane = (): void => {
+          host.declare(`@scr_rec_sync_eager = external global i32`);
+          const eg = B.tmp();
+          const egb = B.tmp();
+          B.line(`${eg} = load i32, ptr @scr_rec_sync_eager`);
+          B.line(`store i32 0, ptr @scr_rec_sync_eager`);
+          B.line(`${egb} = icmp ne i32 ${eg}, 0`);
+          const lLz = B.newLabel("dcr.il");
+          const lEg = B.newLabel("dcr.ie");
+          B.condBr(egb, lEg, lLz);
+          B.startBlock(lLz);
+          B.line(`%rl = call ptr @${mangleRecordNew(t.shapeId)}()`);
+          const vlp = B.tmp();
+          B.line(`${vlp} = getelementptr inbounds %${struct}, ptr %rl, i64 0, i32 ${viewSlotIndex(shape)} ; <view>`);
+          B.line(`store ptr ${this.retainDyn(B, "%d")}, ptr ${vlp}`);
+          if (shape.ownmask) {
+            const op = B.tmp();
+            B.line(`${op} = getelementptr inbounds %${struct}, ptr %rl, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 0`);
+            host.declare(`declare i32 @scr_dyn_is_null_proto(ptr)`);
+            const np = B.tmp();
+            const npb = B.tmp();
+            const npv = B.tmp();
+            B.line(`${np} = call i32 @scr_dyn_is_null_proto(ptr %d)`);
+            B.line(`${npb} = icmp ne i32 ${np}, 0`);
+            B.line(`${npv} = select i1 ${npb}, i8 ${OWNMASK_VALID | OWNMASK_SRC_NULL_PROTO}, i8 ${OWNMASK_VALID}`);
+            B.line(`store i8 ${npv}, ptr ${op}`);
+          }
+          if (shape.srcproto) {
+            host.declare(`declare ptr @scr_dyn_obj_proto_ref(ptr)`);
+            const pr = B.tmp();
+            const prp = B.tmp();
+            B.line(`${pr} = call ptr @scr_dyn_obj_proto_ref(ptr %d)`);
+            B.line(`${prp} = getelementptr inbounds %${struct}, ptr %rl, i64 0, i32 ${srcProtoSlotIndex(shape)}`);
+            B.line(`store ptr ${pr}, ptr ${prp}`);
+          }
+          if (shape.canon === true) {
+            host.declare(`declare ptr @scr_dynview_canon(ptr, ptr, ptr, i64, i64, ptr, ptr)`);
+            const lcv = B.tmp();
+            const lvv = B.tmp();
+            B.line(`${lvv} = load ptr, ptr ${vlp}`);
+            B.line(`${lcv} = call ptr @scr_dynview_canon(ptr %rl, ptr ${lvv}, ptr @${mangleRecordRelease(t.shapeId)}, i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 1) to i64), i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 0, i32 ${viewSlotIndex(shape)}) to i64), ptr @${mangleRecordRetain(t.shapeId)}, ptr @${mangleRecordRelease(t.shapeId)})`);
+            B.terminate(`ret ptr ${lcv}`);
+          } else {
+            B.terminate(`ret ptr %rl`);
+          }
+          B.startBlock(lEg);
+        };
         if (dial || inst || jsv) {
           const proj = dial ? this.recordWideHelper() : null;
           const tbl = shape.fields.length > 0 ? host.recWideTable(t.shapeId, shape.fields) : null;
@@ -1869,6 +1923,7 @@ export class LlDyn {
           B.startBlock(lf);
           failRet();
           B.startBlock(lk);
+          if (lazyIdx) lazyIdxLane();
           // VIEW GRANT, INSTANCE RECEIVER (hard builder only) - emit-walkers.ts's row: the record is a view of
           // the instance and nothing is read at the cast (a getter runs at each READ of the member).
           if (inst && !soft && shape.view === true && shape.indexValue === undefined && !shape.fields.some((f) => this.mayHoldFunc(f.type))) {
@@ -1995,6 +2050,7 @@ export class LlDyn {
           dRef = dw;
         } else {
           requireKind(DK.OBJ, "dcr");
+          if (lazyIdx) lazyIdxLane();
         }
         B.line(`%r0 = call ptr @${mangleRecordNew(t.shapeId)}()`);
         // A shape with several key orders: the dynamic object's own keys say which one this instance has (emit-walkers.ts's row).

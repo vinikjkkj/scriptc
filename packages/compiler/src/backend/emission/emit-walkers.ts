@@ -2698,6 +2698,23 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // the record type the way Node reads it, its getters and methods and inherited
         // members included. It is taken by KIND, ahead of the dial lane, and it is on
         // in both disciplines.
+        // VIEW GRANT, INDEX SIGNATURE (hard builder, a pure `{ [key: string]: T }` shape): the record is a view of the object and
+        // NOTHING is read at the cast - `x as Record<string, T>` is erased in Node, so a getter runs at each READ of a member, not here
+        // (and a getter that deletes a later key must not have run before Object.keys). The snapshot stays empty until recordViewSync
+        // (the viewSyncHelper below) builds it EAGERLY, which it asks for through scr_rec_sync_eager; every key-list, slot and value
+        // consumer syncs first, and the keyed get/set/delete/presence go straight to the object.
+        const lazyIdx = process.env["SCRIPTC_RECVIEW_MUTANT"] !== "eagercast" && !soft && shape.view === true && shape.indexValue !== undefined && shape.fields.length === 0 && !shape.keyOrders && !shape.tostr;
+        const lazyIdxLane = (): void => {
+          d.push(`  { int sc_eager = scr_rec_sync_eager; scr_rec_sync_eager = 0;`);
+          d.push(`    if (!sc_eager) {`);
+          d.push(`      ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
+          d.push(`      r->${VIEW_MEMBER} = scr_dyn_retain((ScrDyn *)d);`);
+          if (shape.ownmask) d.push(`      r->${OWNMASK_MEMBER}[0] = scr_dyn_is_null_proto(d) ? ${OWNMASK_VALID | OWNMASK_SRC_NULL_PROTO} : ${OWNMASK_VALID};`);
+          if (shape.srcproto) d.push(`      r->${SRCPROTO_MEMBER} = scr_dyn_obj_proto_ref(d);`);
+          d.push(shape.canon === true ? `      return (${cType(t).trim()})scr_dynview_canon(r, r->${VIEW_MEMBER}, (const void *)&${mangleRecordRelease(t.shapeId)}, sizeof *r, offsetof(${mangleRecordStruct(t.shapeId)}, ${VIEW_MEMBER}), ${mangleRecordRetain(t.shapeId)}_v, ${mangleRecordRelease(t.shapeId)}_v);` : `      return r;`);
+          d.push(`    }`);
+          d.push(`  }`);
+        };
         const inst = kindgateInstanceLane(shape, moduleUsesInstanceRecordLane(E.mod));
         const jsv = kindgateJsvalLane(shape, moduleUsesEngineFn(E.mod));
         if (wide || inst || jsv) {
@@ -2732,6 +2749,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             ...(wide ? [funcOnly ? `d->kind != SCR_DYN_FUNC` : `!sc_dyn_rec_wideable(d)`] : []),
           ].join(" && ");
           d.push(fail(`  `, "record.kind", kindOk, `NULL`));
+          if (lazyIdx) lazyIdxLane();
           // VIEW GRANT, INSTANCE RECEIVER (hard builder only): the record is a view of the instance and
           // nothing is read at the cast - a getter runs at each READ of the member, not here (a union arm
           // walker, which must read the members to pick an arm, keeps the eager build below, and so does a
@@ -2792,6 +2810,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           projRel = "; if (sc_proj) scr_dyn_release(sc_proj)";
         } else {
           d.push(fail(`  `, "record.kind", `d->kind != SCR_DYN_OBJ`, `NULL`));
+          if (lazyIdx) lazyIdxLane();
         }
         d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
         // A shape with several key orders: the dynamic object's own keys say which one this instance has (a cast has no
@@ -4349,7 +4368,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     E.walkerDefs.push(
       `static void ${name}(${st} *r) { /* refresh the view's snapshot of ${shapeId} */`,
       `  if (!r->${VIEW_MEMBER} || scr_recsrc_is(r->${VIEW_MEMBER})) return; /* a struct view has no snapshot to refresh */`,
+      `  scr_rec_sync_eager = ${process.env["SCRIPTC_RECVIEW_MUTANT"] === "noeager" ? 0 : 1}; /* the lazy cast lane (lazyIdx) reads nothing; the sync is the one place that must */`,
       `  ${st} *t = ${dc}(r->${VIEW_MEMBER}, NULL);`,
+      `  scr_rec_sync_eager = 0;`,
       `  if (!t) return; /* the read threw: the exception is pending */`,
       `  scr_rec_swap_body(r, t, sizeof *r);`,
       `  ${mangleRecordRelease(shapeId)}(t);`,

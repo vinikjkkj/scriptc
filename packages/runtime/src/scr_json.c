@@ -10656,6 +10656,8 @@ static void scr_jb_put_recv_ctor(ScrJsonBuf *b, const ScrDyn *recv) {
  * than answered wrongly. Other kinds carry no own properties a delete
  * could remove, so they answer true like JS. Both borrowed. */
 static void scr_dyn_module_ns_throw(const char *a, const ScrStr *key, const char *b);
+int scr_rec_sync_eager = 0;
+
 bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) return SCR_PX->del(recv, key);
   if (recv != NULL && recv->kind == SCR_DYN_BYTES && !recv->static_copy && recv->v.bytes->own != NULL) {
@@ -10668,8 +10670,6 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
     return false;
   }
-  if (recv->static_copy) {
-    if (recv->module_ns) {
   if (recv->kind == SCR_DYN_JSVAL) {
     /* `delete o.k` removes the property from the REAL engine object (aliasing preserved, island-side readers see it). Before this arm the
      * delete fell through every kind test below to the final `return true` and left the property in place. */
@@ -10679,6 +10679,8 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
     return scr_dyn_jsval_ops()->key_delete(recv->v.jsval.cell, key) > 0;
 #endif
   }
+  if (recv->static_copy) {
+    if (recv->module_ns) {
       if (!scr_dyn_obj_has_own_prop(recv, key->data, key->len)) return true;
       scr_dyn_module_ns_throw("Cannot delete property '", key, "' of [object Module]");
       return false;

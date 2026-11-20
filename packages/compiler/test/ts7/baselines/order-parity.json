@@ -29856,9 +29856,45 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26020-an-index-signature-cast-of-an-island-object-reads-nothing.ts": {
+   "order": [
+    "<repo>/tests/corpus/26020-an-index-signature-cast-of-an-island-object-reads-nothing.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26021-a-getter-that-deletes-a-later-key-does-not-change-the-key-list.ts": {
+   "order": [
+    "<repo>/tests/corpus/26021-a-getter-that-deletes-a-later-key-does-not-change-the-key-list.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/26022-delete-on-an-island-object-removes-the-property.ts": {
    "order": [
     "<repo>/tests/corpus/26022-delete-on-an-island-object-removes-the-property.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26023-an-index-signature-view-is-the-object-for-identity-and-writes.ts": {
+   "order": [
+    "<repo>/tests/corpus/26023-an-index-signature-view-is-the-object-for-identity-and-writes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26024-for-in-over-an-index-signature-view-runs-no-getter.ts": {
+   "order": [
+    "<repo>/tests/corpus/26024-for-in-over-an-index-signature-view-runs-no-getter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26025-spread-and-json-of-an-index-signature-view-read-each-member-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/26025-spread-and-json-of-an-index-signature-view-read-each-member-once.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26026-a-json-object-cast-to-a-record-follows-later-writes-to-the-original.ts": {
+   "order": [
+    "<repo>/tests/corpus/26026-a-json-object-cast-to-a-record-follows-later-writes-to-the-original.ts"
    ],
    "diags": []
   }
