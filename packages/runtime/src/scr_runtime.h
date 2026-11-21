@@ -2689,15 +2689,22 @@ _Static_assert(sizeof(ScrClosure) == 32 && offsetof(ScrClosure, kind) == 8 && of
 
 ScrClosureExt *scr_closure_ext_lookup(const ScrClosure *c);
 static inline ScrClosureExt *scr_closure_ext_of(const ScrClosure *c) { return (c->w & 1u) ? scr_closure_ext_lookup(c) : NULL; }
+/* w bit 1: this closure is a dyn-boundary ADAPTER (scr_dyn_fn_share_props) whose own-property table IS the table of the closure it
+ * wraps, found in caps[0] (a FUNC box holding the wrapped closure). Nothing is allocated for the sharing at the adapter: the table is
+ * looked up (and, on the first write, created) on the root, so a function value that is never given a property never pays for one.
+ * Interned descriptors are 8-aligned, so bits 0 and 1 of w are free. */
+#define SCR_CLO_W_ALIAS 2u
+ScrClosure *scr_closure_alias_origin(const ScrClosure *c);
+static inline ScrClosure *scr_closure_props_root(ScrClosure *c) { while (c->w & SCR_CLO_W_ALIAS) c = scr_closure_alias_origin(c); return c; }
 static inline size_t scr_closure_ncaps(const ScrClosure *c) { return c->ncaps8 != 255 ? (size_t)c->ncaps8 : scr_closure_ext_of(c)->ncaps; }
-static inline ScrBox *scr_closure_props(const ScrClosure *c) { const ScrClosureExt *x = scr_closure_ext_of(c); return x ? x->props : NULL; }
+static inline ScrBox *scr_closure_props(const ScrClosure *c) { const ScrClosureExt *x = scr_closure_ext_of((c->w & SCR_CLO_W_ALIAS) ? scr_closure_props_root((ScrClosure *)(uintptr_t)c) : c); return x ? x->props : NULL; }
 static inline void *scr_closure_proto(const ScrClosure *c) { const ScrClosureExt *x = scr_closure_ext_of(c); return x ? x->implicit_proto : NULL; }
 /* The descriptor this closure's embedded dyn identity carries (NULL until the first boxing), and its setter. */
-static inline const void *scr_closure_desc(const ScrClosure *c) { return (const void *)(c->w & ~(uintptr_t)1); }
+static inline const void *scr_closure_desc(const ScrClosure *c) { return (const void *)(c->w & ~(uintptr_t)3); }
 /* The ext of `c`, made on first need. Aborts on exhaustion like every runtime allocation. */
 ScrClosureExt *scr_closure_ext(ScrClosure *c);
-static inline void scr_closure_set_desc(ScrClosure *c, const void *d) { c->w = (uintptr_t)d | (c->w & 1u); }
-static inline void scr_closure_set_props(ScrClosure *c, ScrBox *b) { scr_closure_ext(c)->props = b; }
+static inline void scr_closure_set_desc(ScrClosure *c, const void *d) { c->w = (uintptr_t)d | (c->w & 3u); }
+static inline void scr_closure_set_props(ScrClosure *c, ScrBox *b) { scr_closure_ext(scr_closure_props_root(c))->props = b; }
 static inline void scr_closure_set_proto(ScrClosure *c, void *p) { scr_closure_ext(c)->implicit_proto = p; }
 
 

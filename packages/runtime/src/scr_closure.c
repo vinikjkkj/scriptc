@@ -453,6 +453,8 @@ static void scr_cx_erase(const ScrClosure *c) {
     scr_cx_put(s.k, s.v);
   }
 }
+ScrClosure *scr_closure_alias_origin(const ScrClosure *c) { return (ScrClosure *)scr_box_ptr(c->caps[0]); }
+
 ScrClosureExt *scr_closure_ext(ScrClosure *c) {
   ScrClosureExt *x = scr_closure_ext_of(c);
   if (x == NULL) {

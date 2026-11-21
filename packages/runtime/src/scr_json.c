@@ -13204,12 +13204,10 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
  * function object per closure, not one per boundary crossing. +1. */
 void scr_dyn_fn_share_props(ScrClosure *adapter, const ScrDyn *fn) {
   if (fn->kind != SCR_DYN_FUNC || adapter == NULL || scr_closure_props(adapter) != NULL) return;
-  /* An IMMORTAL closure (a function declared once at file scope, rc == SIZE_MAX) is never freed, so a table allocated onto it here would never be
-   * released: it keeps the table it already has and otherwise stays without one (nothing wrote a property on it that an adapter could lose). */
-  if (scr_closure_props(scr_dyn_fn_clo(fn)) == NULL && *(const size_t *)scr_dyn_fn_clo(fn) == SIZE_MAX) return;
-  ScrDyn *t = scr_dyn_fn_props((ScrDyn *)fn); /* +1: allocates the table on first use */
-  scr_dyn_release(t);
-  scr_closure_set_props(adapter, scr_box_retain(scr_closure_props(scr_dyn_fn_clo(fn))));
+  /* The adapter ALIASES the wrapped closure's table (scr_closure_props_root): the callers have just stored that closure in caps[0], and
+   * no table is allocated here. It used to build the wrapped function's table and the adapter's ext on every crossing, ~270 Ir each, so a
+   * callback crossing the boundary once per call paid for a property table nobody read. */
+  if (scr_closure_ncaps(adapter) >= 1 && scr_closure_alias_origin(adapter) == scr_dyn_fn_clo(fn)) adapter->w |= SCR_CLO_W_ALIAS;
 }
 
 ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
