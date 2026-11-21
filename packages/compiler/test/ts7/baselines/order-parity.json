@@ -18248,6 +18248,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26560-an-adapted-function-aliases-the-own-properties-of-the-function-it-wraps.js": {
+   "order": [
+    "<repo>/tests/corpus/26560-an-adapted-function-aliases-the-own-properties-of-the-function-it-wraps.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2657-top-level-await-cycle-dynamic/main.ts": {
    "order": [
     "<repo>/tests/corpus/2657-top-level-await-cycle-dynamic/b.ts",
